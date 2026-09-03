@@ -8,7 +8,7 @@ import os
 import requests
 from fastapi import APIRouter, Query
 from typing import Dict, Any, List, Optional
-from backend.database import WARDS_DATA
+from backend.database import WARDS_DATA, estimate_base_elevation
 from backend.ml_engine import ml_engine
 from backend.ingestion import ingestion_manager
 
@@ -75,9 +75,9 @@ def search_location(
                             "lat": lat,
                             "lon": lon,
                             "ward_id": nearest_ward["id"] if nearest_ward else None,
-                            "risk_level": nearest_ward["risk_level"] if nearest_ward else "Moderate",
-                            "risk_score": nearest_ward["risk_score"] if nearest_ward else 45.0,
-                            "predicted_depth_cm": nearest_ward["predicted_depth_cm"] if nearest_ward else 20.0
+                            "risk_level": nearest_ward["risk_level"] if nearest_ward else "Low",
+                            "risk_score": nearest_ward["risk_score"] if nearest_ward else 8.0,
+                            "predicted_depth_cm": nearest_ward["predicted_depth_cm"] if nearest_ward else 0.0
                         })
         except Exception:
             pass
@@ -101,9 +101,9 @@ def search_location(
                             "lat": lat,
                             "lon": lon,
                             "ward_id": nearest_ward["id"] if nearest_ward else None,
-                            "risk_level": nearest_ward["risk_level"] if nearest_ward else "Moderate",
-                            "risk_score": nearest_ward["risk_score"] if nearest_ward else 45.0,
-                            "predicted_depth_cm": nearest_ward["predicted_depth_cm"] if nearest_ward else 25.0
+                            "risk_level": nearest_ward["risk_level"] if nearest_ward else "Low",
+                            "risk_score": nearest_ward["risk_score"] if nearest_ward else 8.0,
+                            "predicted_depth_cm": nearest_ward["predicted_depth_cm"] if nearest_ward else 0.0
                         })
         except Exception:
             pass
@@ -144,6 +144,16 @@ def reverse_geocode(
     
     loc_id = nearest["id"] if is_in_mumbai else f"loc_{lat}_{lon}_{requests.utils.quote(place_name)}"
 
+    scenario = ingestion_manager.get_current_scenario()
+    sc_id = scenario.get("id", "live_weather")
+
+    if sc_id == "live_weather":
+        advice = f"You are within a monitored Mumbai drainage basin ({nearest['name']})." if is_in_mumbai else f"Monitoring live weather in {city} (Outside Mumbai pilot catchment)."
+    elif sc_id == "dry_baseline":
+        advice = f"Dry Weather Baseline active across {city}."
+    else:
+        advice = f"Active Simulation: {scenario['name']} stress-testing hydrology in {city}."
+
     return {
         "status": "success",
         "coordinates": {"lat": lat, "lon": lon},
@@ -152,12 +162,13 @@ def reverse_geocode(
         "loc_id": loc_id,
         "is_in_pilot_catchment": is_in_mumbai,
         "matched_flood_ward": nearest,
-        "advice": f"You are within a monitored Mumbai drainage basin ({nearest['name']})." if is_in_mumbai else f"Monitoring live weather in {city} (Outside Mumbai pilot catchment)."
+        "advice": advice
     }
 
 def find_nearest_ward(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     """Calculates closest ward center to coordinates and returns calibrated ML risk."""
     scenario = ingestion_manager.get_current_scenario()
+    sc_id = scenario.get("id", "live_weather")
     best_ward = None
     min_dist = float("inf")
 
@@ -171,15 +182,27 @@ def find_nearest_ward(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     if best_ward:
         # If coordinates are outside Mumbai urban basin (> 0.22 degrees, ~24km away):
         if min_dist > 0.22:
+            base_elev = estimate_base_elevation(lat, lon)
+            virtual_ward = {
+                "id": f"loc_{lat}_{lon}",
+                "name": "Regional Location",
+                "avg_elevation_m": base_elev,
+                "terrain_slope_deg": 1.6,
+                "impervious_surface_pct": 78.0,
+                "drainage_density_idx": 45.0,
+                "antecedent_moisture_pct": 68.0,
+                "historical_waterlogging_frequency": "Moderate"
+            }
+            pred = ml_engine.predict_ward_risk(virtual_ward, scenario.get("params"))
             return {
                 "id": None,
-                "name": "Outside Catchment Area",
-                "code": "OUT-BASIN",
-                "zone": "Non-Vulnerable Region",
+                "name": "Regional Monitored Basin",
+                "code": "REGIONAL",
+                "zone": "Regional Topographic Basin",
                 "distance_degrees": round(min_dist, 4),
-                "risk_level": "Low",
-                "risk_score": 8.0,
-                "predicted_depth_cm": 0.0,
+                "risk_level": pred["risk_level"],
+                "risk_score": pred["risk_score"],
+                "predicted_depth_cm": pred["predicted_depth_cm"],
                 "nearest_shelter": None
             }
 

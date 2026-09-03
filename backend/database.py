@@ -786,3 +786,221 @@ CREATE TABLE IF NOT EXISTS emergency_resources (
     allocated_wards JSONB
 );
 """
+
+
+def estimate_base_elevation(lat: float, lon: float) -> float:
+    """Estimates typical baseline elevation in meters for Indian geographic coordinates."""
+    # Bengaluru & Mysore Plateau (lat 12.0 - 13.5, lon 75.5 - 77.9)
+    if 12.0 <= lat <= 13.5 and 76.5 <= lon <= 77.9:
+        return 910.0
+    # Deccan Plateau (Hyderabad, Pune, Solapur, etc.)
+    if 16.5 <= lat <= 19.5 and 73.8 <= lon <= 79.5:
+        return 550.0
+    # Coastal plains & lowlands (Mumbai, Chennai, Kolkata, Kochi, Surat, Goa, etc.)
+    if 12.5 <= lat <= 13.5 and 79.9 <= lon <= 80.4:  # Chennai / Tambaram
+        return 12.0
+    if 18.8 <= lat <= 19.4 and 72.7 <= lon <= 73.2:  # Mumbai MMR
+        return 8.0
+    if 22.0 <= lat <= 23.0 and 88.0 <= lon <= 88.8:  # Kolkata
+        return 9.0
+    if (lon < 73.4 or lon > 80.0) and lat < 21.0:
+        return 8.0
+    # Northern Gangetic Plains (Delhi, Kanpur, Lucknow, Patna)
+    if 25.0 <= lat <= 29.0 and 76.5 <= lon <= 86.0:
+        return 190.0
+    # Himalayas / Hills (lat > 29.5 or Western Ghats)
+    if lat > 29.5:
+        return 1200.0
+    return 150.0
+
+
+def generate_regional_wards(lat: float, lon: float, name: str = "Searched Location") -> List[Dict[str, Any]]:
+    """Generates 4 contiguous flood wards with distinct topographic & drainage features around any searched GPS location."""
+    clean_name = name.split(",")[0].strip()
+    r_lat = round(lat, 4)
+    r_lon = round(lon, 4)
+    base_elev = estimate_base_elevation(lat, lon)
+
+    return [
+        {
+            "id": f"reg-basin-{r_lat}-{r_lon}-1",
+            "name": f"{clean_name} (Central Runoff Basin)",
+            "code": "REG-01",
+            "zone": "Lowland Runoff Basin",
+            "population": 165000,
+            "area_km2": 3.6,
+            "avg_elevation_m": round(max(3.0, base_elev - 3.5), 1),
+            "terrain_slope_deg": 0.8,
+            "impervious_surface_pct": 85,
+            "drainage_density_idx": 36,
+            "antecedent_moisture_pct": 82,
+            "historical_waterlogging_frequency": "Very High",
+            "center": [round(lat + 0.007, 4), round(lon + 0.007, 4)],
+            "polygon": [
+                [round(lat + 0.001, 4), round(lon + 0.001, 4)],
+                [round(lat + 0.013, 4), round(lon + 0.001, 4)],
+                [round(lat + 0.015, 4), round(lon + 0.014, 4)],
+                [round(lat + 0.008, 4), round(lon + 0.016, 4)],
+                [round(lat + 0.001, 4), round(lon + 0.010, 4)],
+                [round(lat + 0.001, 4), round(lon + 0.001, 4)]
+            ],
+            "vulnerable_assets": [
+                {"name": f"{clean_name} Transit Underpass", "type": "transit", "lat": round(lat + 0.007, 4), "lon": round(lon + 0.006, 4), "vulnerability": "Severe"},
+                {"name": f"{clean_name} General Hospital", "type": "hospital", "lat": round(lat + 0.009, 4), "lon": round(lon + 0.008, 4), "vulnerability": "High"}
+            ],
+            "nearest_shelter": {"name": f"{clean_name} Community Relief Center", "lat": round(lat + 0.011, 4), "lon": round(lon + 0.010, 4), "capacity": 650, "occupied": 20}
+        },
+        {
+            "id": f"reg-basin-{r_lat}-{r_lon}-2",
+            "name": f"{clean_name} (Commercial & Transit Sector)",
+            "code": "REG-02",
+            "zone": "Commercial Corridor",
+            "population": 145000,
+            "area_km2": 2.9,
+            "avg_elevation_m": round(max(5.0, base_elev + 1.5), 1),
+            "terrain_slope_deg": 1.4,
+            "impervious_surface_pct": 88,
+            "drainage_density_idx": 45,
+            "antecedent_moisture_pct": 74,
+            "historical_waterlogging_frequency": "High",
+            "center": [round(lat - 0.007, 4), round(lon + 0.007, 4)],
+            "polygon": [
+                [round(lat - 0.001, 4), round(lon + 0.001, 4)],
+                [round(lat - 0.001, 4), round(lon + 0.014, 4)],
+                [round(lat - 0.013, 4), round(lon + 0.015, 4)],
+                [round(lat - 0.014, 4), round(lon + 0.002, 4)],
+                [round(lat - 0.001, 4), round(lon + 0.001, 4)]
+            ],
+            "vulnerable_assets": [
+                {"name": f"{clean_name} Metro Station", "type": "transit", "lat": round(lat - 0.006, 4), "lon": round(lon + 0.007, 4), "vulnerability": "High"}
+            ],
+            "nearest_shelter": {"name": f"{clean_name} Sports Complex Relief Hub", "lat": round(lat - 0.008, 4), "lon": round(lon + 0.008, 4), "capacity": 850, "occupied": 15}
+        },
+        {
+            "id": f"reg-basin-{r_lat}-{r_lon}-3",
+            "name": f"{clean_name} (Drainage Canal & Lowland Sump)",
+            "code": "REG-03",
+            "zone": "Canal Outfall Basin",
+            "population": 180000,
+            "area_km2": 4.2,
+            "avg_elevation_m": round(max(2.0, base_elev - 6.0), 1),
+            "terrain_slope_deg": 0.4,
+            "impervious_surface_pct": 82,
+            "drainage_density_idx": 28,
+            "antecedent_moisture_pct": 88,
+            "historical_waterlogging_frequency": "Severe",
+            "center": [round(lat - 0.007, 4), round(lon - 0.007, 4)],
+            "polygon": [
+                [round(lat - 0.001, 4), round(lon - 0.001, 4)],
+                [round(lat - 0.013, 4), round(lon - 0.002, 4)],
+                [round(lat - 0.015, 4), round(lon - 0.014, 4)],
+                [round(lat - 0.003, 4), round(lon - 0.015, 4)],
+                [round(lat - 0.001, 4), round(lon - 0.001, 4)]
+            ],
+            "vulnerable_assets": [
+                {"name": f"{clean_name} Lowland Settlement", "type": "settlement", "lat": round(lat - 0.007, 4), "lon": round(lon - 0.008, 4), "vulnerability": "Severe"}
+            ],
+            "nearest_shelter": {"name": f"{clean_name} Secondary School Pavilion", "lat": round(lat - 0.005, 4), "lon": round(lon - 0.006, 4), "capacity": 500, "occupied": 25}
+        },
+        {
+            "id": f"reg-basin-{r_lat}-{r_lon}-4",
+            "name": f"{clean_name} (Elevated Ridge / High Ground)",
+            "code": "REG-04",
+            "zone": "Elevated Plateau",
+            "population": 115000,
+            "area_km2": 3.3,
+            "avg_elevation_m": round(base_elev + 14.0, 1),
+            "terrain_slope_deg": 3.8,
+            "impervious_surface_pct": 62,
+            "drainage_density_idx": 68,
+            "antecedent_moisture_pct": 55,
+            "historical_waterlogging_frequency": "Low",
+            "center": [round(lat + 0.007, 4), round(lon - 0.007, 4)],
+            "polygon": [
+                [round(lat + 0.001, 4), round(lon - 0.001, 4)],
+                [round(lat + 0.002, 4), round(lon - 0.014, 4)],
+                [round(lat + 0.014, 4), round(lon - 0.013, 4)],
+                [round(lat + 0.014, 4), round(lon - 0.001, 4)],
+                [round(lat + 0.001, 4), round(lon - 0.001, 4)]
+            ],
+            "vulnerable_assets": [],
+            "nearest_shelter": {"name": f"{clean_name} Government College Ground", "lat": round(lat + 0.008, 4), "lon": round(lon - 0.006, 4), "capacity": 1200, "occupied": 0}
+        }
+    ]
+
+
+def generate_regional_sensors(lat: float, lon: float, name: str = "Searched Location") -> List[Dict[str, Any]]:
+    """Generates localized river/drainage gauges and AWS weather stations around any searched coordinates."""
+    clean_name = name.split(",")[0].strip()
+    return [
+        {
+            "id": "reg-gauge-1",
+            "type": "river_gauge",
+            "name": f"{clean_name} - Main Outfall Canal Gauge",
+            "code": "CWC-REG-01",
+            "lat": round(lat + 0.004, 4),
+            "lon": round(lon + 0.005, 4),
+            "current_level_m": 2.2,
+            "warning_mark_m": 2.8,
+            "danger_mark_m": 3.8,
+            "discharge_cumec": 85.0,
+            "status": "safe",
+            "basin": f"{clean_name} Urban Drainage Basin"
+        },
+        {
+            "id": "reg-gauge-2",
+            "type": "river_gauge",
+            "name": f"{clean_name} - Lowland Creek Gauge",
+            "code": "CWC-REG-02",
+            "lat": round(lat - 0.005, 4),
+            "lon": round(lon - 0.004, 4),
+            "current_level_m": 1.9,
+            "warning_mark_m": 2.5,
+            "danger_mark_m": 3.4,
+            "discharge_cumec": 62.0,
+            "status": "safe",
+            "basin": f"{clean_name} Creek Valley"
+        },
+        {
+            "id": "reg-aws-1",
+            "type": "aws",
+            "name": f"{clean_name} - North Met AWS Station",
+            "code": "AWS-REG-N",
+            "lat": round(lat + 0.009, 4),
+            "lon": round(lon - 0.005, 4),
+            "current_rain_mm_hr": 25.0,
+            "cum_3hr_rain_mm": 62.0,
+            "cum_24hr_rain_mm": 115.0,
+            "soil_moisture_pct": 78,
+            "temp_c": 25.5,
+            "humidity_pct": 86,
+            "status": "online"
+        },
+        {
+            "id": "reg-aws-2",
+            "type": "aws",
+            "name": f"{clean_name} - South AWS Station",
+            "code": "AWS-REG-S",
+            "lat": round(lat - 0.007, 4),
+            "lon": round(lon + 0.008, 4),
+            "current_rain_mm_hr": 30.0,
+            "cum_3hr_rain_mm": 74.0,
+            "cum_24hr_rain_mm": 130.0,
+            "soil_moisture_pct": 82,
+            "temp_c": 25.0,
+            "humidity_pct": 89,
+            "status": "online"
+        },
+        {
+            "id": "reg-dwr-1",
+            "type": "dwr_radar",
+            "name": f"{clean_name} - Regional Doppler Radar",
+            "code": "DWR-REG",
+            "lat": round(lat - 0.030, 4),
+            "lon": round(lon - 0.030, 4),
+            "max_reflectivity_dbz": 45.0,
+            "beam_elevation_deg": 0.5,
+            "range_km": 45,
+            "status": "online"
+        }
+    ]

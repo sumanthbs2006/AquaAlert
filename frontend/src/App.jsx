@@ -19,6 +19,12 @@ export default function App() {
   const [sensors, setSensors] = useState(null);
   const [sensorsSummary, setSensorsSummary] = useState(null);
   const [selectedWardId, setSelectedWardId] = useState(null);
+  const [currentRegion, setCurrentRegion] = useState({
+    lat: 19.076,
+    lon: 72.877,
+    name: 'Mumbai Metropolitan Basin',
+    isRegional: false
+  });
   const [loading, setLoading] = useState(true);
 
   const getScenarioName = (sc) => {
@@ -60,6 +66,23 @@ export default function App() {
     }
   };
 
+  // Handle User Search or Geolocation Anywhere
+  const handleLocationChange = async ({ lat, lon, name }) => {
+    try {
+      const isRegional = Math.hypot(lat - 19.076, lon - 72.877) > 0.22;
+      setCurrentRegion({ lat, lon, name, isRegional });
+      const query = isRegional ? `?lat=${lat}&lon=${lon}&name=${encodeURIComponent(name || 'Searched Area')}` : '';
+      const [rzRes, sensorsRes] = await Promise.all([
+        fetch(`/api/risk-zones${query}`).then(r => r.json()),
+        fetch(`/api/sensors${query}`).then(r => r.json())
+      ]);
+      setRiskZones(rzRes);
+      setSensors(sensorsRes);
+    } catch (e) {
+      console.error('Failed to load regional telemetry:', e);
+    }
+  };
+
   // Scenario Selection Handler
   const handleSelectScenario = async (scenarioId) => {
     try {
@@ -71,10 +94,11 @@ export default function App() {
 
       if (res.status === 'success') {
         setActiveScenario(res.scenario);
-        // Refresh risk zones & sensor telemetry
+        // Refresh risk zones & sensor telemetry for current region
+        const query = currentRegion.isRegional ? `?lat=${currentRegion.lat}&lon=${currentRegion.lon}&name=${encodeURIComponent(currentRegion.name)}` : '';
         const [rzRes, sensorsRes, summaryRes] = await Promise.all([
-          fetch('/api/risk-zones').then(r => r.json()),
-          fetch('/api/sensors').then(r => r.json()),
+          fetch(`/api/risk-zones${query}`).then(r => r.json()),
+          fetch(`/api/sensors${query}`).then(r => r.json()),
           fetch('/api/sensors/summary').then(r => r.json())
         ]);
         setRiskZones(rzRes);
@@ -111,12 +135,16 @@ export default function App() {
               sensors={sensors}
               selectedWardId={selectedWardId}
               onSelectWard={(wardId) => setSelectedWardId(wardId)}
+              activeScenario={activeScenario}
+              currentRegion={currentRegion}
+              onLocationChange={handleLocationChange}
               currentLang={currentLang}
             />
             {selectedWardId && (
               <AreaDetailDrawer
                 wardId={selectedWardId}
                 onClose={() => setSelectedWardId(null)}
+                activeScenario={activeScenario}
                 activeScenarioName={getScenarioName(activeScenario)}
                 currentLang={currentLang}
               />

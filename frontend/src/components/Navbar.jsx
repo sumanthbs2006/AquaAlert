@@ -77,6 +77,11 @@ export default function Navbar({
                 {sensorsSummary?.peak_river_danger_status ?? 'WARNING'}
               </strong>
             </span>
+            <span className="hidden md:inline text-slate-600">|</span>
+            <span className="hidden md:flex items-center gap-1.5 text-orange-300 font-medium text-[11px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+              <span>Live Met: <strong>OpenWeatherMap API</strong></span>
+            </span>
           </div>
 
           {/* Emergency Helpline Direct Dialer (Compact on Mobile) */}

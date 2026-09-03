@@ -57,11 +57,16 @@ export default function MapView({
   sensors, 
   selectedWardId, 
   onSelectWard,
+  activeScenario,
+  currentRegion,
+  onLocationChange,
   currentLang = 'en'
 }) {
   const t = getTranslation(currentLang);
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
+  const lastGpsMarkerRef = useRef(null);
+  const lastSearchPinRef = useRef(null);
   const layersRef = useRef({
     tileLayer: null,
     polygons: null,
@@ -143,17 +148,21 @@ export default function MapView({
 
     mapInstanceRef.current = map;
 
-    // Fetch live atmospheric conditions
-    fetch('/api/carto/live-weather')
-      .then(r => r.json())
-      .then(data => setLiveMet(data))
-      .catch(console.error);
-
     return () => {
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
+
+  // Fetch live OpenWeather atmospheric conditions whenever region changes
+  useEffect(() => {
+    const lat = currentRegion?.lat ?? 19.076;
+    const lon = currentRegion?.lon ?? 72.877;
+    fetch(`/api/carto/live-weather?lat=${lat}&lon=${lon}`)
+      .then(r => r.json())
+      .then(data => setLiveMet(data))
+      .catch(console.error);
+  }, [currentRegion]);
 
   // 2. Basemap Switcher Effect
   useEffect(() => {
@@ -267,55 +276,141 @@ export default function MapView({
     if (!layerVisibility.weatherRadar) return;
 
     const radarGroup = L.layerGroup();
+    const cLat = currentRegion?.lat ?? 19.070;
+    const cLon = currentRegion?.lon ?? 72.875;
+    const isReg = currentRegion?.isRegional ?? false;
+    const rStationLat = isReg ? cLat - 0.03 : 18.910;
+    const rStationLon = isReg ? cLon - 0.03 : 72.820;
 
-    // S-Band Doppler Radar Range Rings (Colaba)
-    L.circle([18.910, 72.820], {
+    const scId = activeScenario?.id || 'live_weather';
+    const isCrisisSevere = scId === 'cloudburst';
+    const isCyclone = scId === 'cyclone_surge' || scId === 'cyclone';
+    const isNormalRain = scId === 'normal_monsoon' || scId === 'normal';
+    const isDryOrClear = scId === 'dry_baseline' || scId === 'live_weather';
+
+    // S-Band Doppler Radar Range Rings (Outer 45 km perimeter)
+    L.circle([rStationLat, rStationLon], {
       radius: 45000,
       color: '#0284c7',
       weight: 1,
       dashArray: '4, 8',
       fillColor: '#0284c7',
-      fillOpacity: 0.02
-    }).addTo(radarGroup);
-
-    // Convective Storm Cloud Core 1 (Mithi Basin - >54 dBZ)
-    L.circle([19.070, 72.875], {
-      radius: 5500,
-      color: '#ef4444',
-      weight: 1.5,
-      fillColor: '#dc2626',
-      fillOpacity: 0.32,
-      dashArray: '3, 4'
+      fillOpacity: isDryOrClear ? 0.015 : 0.03
     }).bindPopup(`
       <div style="font-size: 12px;">
-        <strong style="color: #ef4444;">DWR Doppler Radar Convective Core</strong><br/>
-        Reflectivity: <strong>54.5 dBZ</strong> (Intense Rain Band)<br/>
-        Cloud Top Height: <strong>14.2 km</strong><br/>
-        Motion: <strong>22 km/h ENE</strong>
+        <strong style="color: #0284c7;">DWR S-Band Radar Surveillance Station</strong><br/>
+        Coverage Radius: <strong>45 km</strong><br/>
+        Scan Mode: <strong>${isDryOrClear ? 'Clear-Air Mode (VCP 31)' : 'Precipitation Mode (VCP 21)'}</strong><br/>
+        Region: <strong>${currentRegion?.name || 'Monitored Basin'}</strong>
       </div>
     `).addTo(radarGroup);
 
-    // Secondary Rain Band (Sion-Dadar - 48 dBZ)
-    L.circle([19.035, 72.860], {
-      radius: 3800,
-      color: '#f97316',
-      weight: 1,
-      fillColor: '#ea580c',
-      fillOpacity: 0.25
-    }).addTo(radarGroup);
+    if (isDryOrClear) {
+      // Clear Sky Mode: Only faint calm atmospheric boundary layer echo (<15 dBZ, calm blue/cyan)
+      L.circle([cLat, cLon], {
+        radius: 4000,
+        color: '#38bdf8',
+        weight: 1,
+        dashArray: '3, 6',
+        fillColor: '#0284c7',
+        fillOpacity: 0.04
+      }).bindPopup(`
+        <div style="font-size: 12px;">
+          <strong style="color: #38bdf8;">DWR Doppler Radar — Clear Air Scan</strong><br/>
+          Reflectivity: <strong>&lt; 15 dBZ</strong> (Clear Sky / No Active Precipitation Echoes)<br/>
+          Atmospheric Status: <strong>Normal / Zero Convective Threat</strong><br/>
+          Region: <strong>${currentRegion?.name || 'Monitored Region'}</strong>
+        </div>
+      `).addTo(radarGroup);
+    } else if (isCrisisSevere) {
+      // Severe Monsoon Cloudburst (>54 dBZ convective storm core)
+      L.circle([cLat + (isReg ? 0.003 : 0.0), cLon + (isReg ? 0.003 : 0.0)], {
+        radius: 5500,
+        color: '#ef4444',
+        weight: 1.5,
+        fillColor: '#dc2626',
+        fillOpacity: 0.32,
+        dashArray: '3, 4'
+      }).bindPopup(`
+        <div style="font-size: 12px;">
+          <strong style="color: #ef4444;">DWR Doppler Radar Convective Core</strong><br/>
+          Region: <strong>${currentRegion?.name || 'Monitored Region'}</strong><br/>
+          Reflectivity: <strong>55.4 dBZ</strong> (Intense Cloudburst Storm Core)<br/>
+          Cloud Top Height: <strong>14.2 km</strong><br/>
+          Motion: <strong>22 km/h ENE</strong>
+        </div>
+      `).addTo(radarGroup);
 
-    // Tertiary Rain Band (Andheri Subway Corridor - 42 dBZ)
-    L.circle([19.115, 72.855], {
-      radius: 3200,
-      color: '#eab308',
-      weight: 1,
-      fillColor: '#ca8a04',
-      fillOpacity: 0.22
-    }).addTo(radarGroup);
+      // Secondary Rain Band (48 dBZ)
+      L.circle([cLat - 0.007, cLon + 0.006], {
+        radius: 3800,
+        color: '#f97316',
+        weight: 1,
+        fillColor: '#ea580c',
+        fillOpacity: 0.25
+      }).addTo(radarGroup);
+
+      // Tertiary Rain Band (42 dBZ)
+      L.circle([cLat + 0.010, cLon - 0.007], {
+        radius: 3200,
+        color: '#eab308',
+        weight: 1,
+        fillColor: '#ca8a04',
+        fillOpacity: 0.22
+      }).addTo(radarGroup);
+    } else if (isCyclone) {
+      // Cyclone Rain Spiral Bands (46 dBZ / 38 dBZ)
+      L.circle([cLat - 0.004, cLon + 0.005], {
+        radius: 4800,
+        color: '#f97316',
+        weight: 1.2,
+        fillColor: '#ea580c',
+        fillOpacity: 0.28,
+        dashArray: '4, 4'
+      }).bindPopup(`
+        <div style="font-size: 12px;">
+          <strong style="color: #f97316;">Cyclonic Outer Rain Band</strong><br/>
+          Reflectivity: <strong>46.0 dBZ</strong> (Heavy Rain Band & Wind Shear)<br/>
+          Region: <strong>${currentRegion?.name || 'Monitored Region'}</strong>
+        </div>
+      `).addTo(radarGroup);
+
+      L.circle([cLat + 0.008, cLon - 0.006], {
+        radius: 3500,
+        color: '#eab308',
+        weight: 1,
+        fillColor: '#ca8a04',
+        fillOpacity: 0.22
+      }).addTo(radarGroup);
+    } else if (isNormalRain) {
+      // Moderate Steady Monsoon (28-34 dBZ, green/cyan steady precipitation echoes)
+      L.circle([cLat + 0.002, cLon + 0.002], {
+        radius: 4200,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#16a34a',
+        fillOpacity: 0.20
+      }).bindPopup(`
+        <div style="font-size: 12px;">
+          <strong style="color: #22c55e;">DWR Doppler Radar — Steady Rain Echo</strong><br/>
+          Reflectivity: <strong>32.5 dBZ</strong> (Moderate Steady Precipitation)<br/>
+          Rain Rate: <strong>8 - 15 mm/hr</strong><br/>
+          Region: <strong>${currentRegion?.name || 'Monitored Region'}</strong>
+        </div>
+      `).addTo(radarGroup);
+
+      L.circle([cLat - 0.006, cLon - 0.005], {
+        radius: 3000,
+        color: '#06b6d4',
+        weight: 1,
+        fillColor: '#0891b2',
+        fillOpacity: 0.15
+      }).addTo(radarGroup);
+    }
 
     radarGroup.addTo(map);
     layersRef.current.radar = radarGroup;
-  }, [layerVisibility.weatherRadar]);
+  }, [layerVisibility.weatherRadar, currentRegion, activeScenario]);
 
   // 5. Radar Sweep Line Animation Interval
   useEffect(() => {
@@ -326,7 +421,7 @@ export default function MapView({
     return () => clearInterval(interval);
   }, [radarPlaying]);
 
-  // 6. Render High-Ground Evacuation Route Polyline for Selected Ward
+  // 6. Render High-Ground Evacuation Route Polyline & Designated Relief Shelters
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -336,80 +431,125 @@ export default function MapView({
       layersRef.current.evacuation = null;
     }
 
-    if (!selectedWardId || !layerVisibility.evacuationCorridors) {
+    if (!layerVisibility.evacuationCorridors) {
       setActiveEvacuationInfo(null);
       return;
     }
 
-    fetch(`/api/carto/evacuation-route/${selectedWardId}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.status !== 'success' || !data.route) return;
-        const route = data.route;
-        setActiveEvacuationInfo(route);
+    const evacGroup = L.layerGroup();
 
-        const evacGroup = L.layerGroup();
+    // 1. Render all Designated Relief Shelter Markers (⛺) in the active zone
+    if (riskZones?.features) {
+      riskZones.features.forEach((feat) => {
+        const shelter = feat.properties.nearest_shelter;
+        if (shelter && shelter.lat && shelter.lon) {
+          const shelterIcon = L.divIcon({
+            className: 'evac-shelter-icon',
+            html: `
+              <div class="w-8 h-8 rounded-xl bg-emerald-600 border-2 border-white shadow-2xl flex items-center justify-center text-sm transform hover:scale-125 transition-transform">
+                ⛺
+              </div>
+            `,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+          });
 
-        // Pulsing Glowing Green Safe Corridor Polyline
-        const polyline = L.polyline(route.waypoints, {
-          color: '#10b981',
-          weight: 5,
-          opacity: 0.9,
-          dashArray: '8, 10',
-          className: 'evac-pulsing-path'
-        }).addTo(evacGroup);
+          L.marker([shelter.lat, shelter.lon], { icon: shelterIcon })
+            .bindPopup(`
+              <div style="font-size: 12px; font-family: inherit;">
+                <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                  <span style="font-size: 14px;">⛺</span>
+                  <strong style="color: #10b981; font-size: 13px;">${shelter.name}</strong>
+                </div>
+                Capacity: <strong>${shelter.capacity || 750} citizens</strong><br/>
+                Current Occupancy: <strong style="color: #38bdf8;">${shelter.occupied || 15} evacuees</strong><br/>
+                Status: <strong style="color: #22c55e;">OPEN &amp; OPERATIONAL</strong><br/>
+                Zone: <span>${feat.properties.name}</span><br/>
+                <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 4px;">
+                  Official municipal high-ground emergency relief sanctuary
+                </span>
+              </div>
+            `)
+            .addTo(evacGroup);
+        }
+      });
+    }
 
-        // Origin Lowland Vulnerability Node Marker
-        const originIcon = L.divIcon({
-          className: 'evac-origin-icon',
-          html: `
-            <div class="w-6 h-6 rounded-full bg-red-600 border-2 border-white shadow-xl flex items-center justify-center text-[10px] animate-bounce">
-              ⚠️
-            </div>
-          `,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12]
-        });
+    // 2. Identify active target ward for evacuation pathway
+    const isCrisis = activeScenario?.id === 'cloudburst' || activeScenario?.id === 'cyclone_surge';
+    const targetWardId = selectedWardId || (isCrisis ? (riskZones?.features?.[0]?.properties?.ward_id) : null);
 
-        L.marker(route.origin_point.coords, { icon: originIcon })
-          .bindPopup(`
-            <div style="font-size: 12px;">
-              <strong style="color: #ef4444;">Flooding Hazard Origin</strong><br/>
-              ${route.origin_point.name}<br/>
-              <span style="color: #94a3b8;">Evacuate via marked high-ground pathway</span>
-            </div>
-          `)
-          .addTo(evacGroup);
+    if (targetWardId) {
+      fetch(`/api/carto/evacuation-route/${targetWardId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.status !== 'success' || !data.route) return;
+          const route = data.route;
+          setActiveEvacuationInfo(route);
 
-        // Safe Relief Shelter Destination Marker
-        const shelterIcon = L.divIcon({
-          className: 'evac-shelter-icon',
-          html: `
-            <div class="w-7 h-7 rounded-lg bg-emerald-600 border-2 border-white shadow-2xl flex items-center justify-center text-xs">
-              ⛺
-            </div>
-          `,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14]
-        });
+          // Pulsing Glowing Green Safe Corridor Polyline
+          L.polyline(route.waypoints, {
+            color: '#10b981',
+            weight: 5,
+            opacity: 0.9,
+            dashArray: '8, 10',
+            className: 'evac-pulsing-path'
+          }).addTo(evacGroup);
 
-        L.marker(route.destination_shelter.coords, { icon: shelterIcon })
-          .bindPopup(`
-            <div style="font-size: 12px;">
-              <strong style="color: #10b981; font-size: 13px;">Designated Relief Shelter</strong><br/>
-              ${route.destination_shelter.name}<br/>
-              Distance: <strong>${route.distance_m}m (~${route.est_evacuation_time_mins} min walk)</strong><br/>
-              Elevation Gain: <strong style="color: #38bdf8;">+${route.elevation_gain_m}m above flood level</strong>
-            </div>
-          `)
-          .addTo(evacGroup)
-          .openPopup();
+          // Origin Lowland Vulnerability Node Marker
+          const originIcon = L.divIcon({
+            className: 'evac-origin-icon',
+            html: `
+              <div class="w-7 h-7 rounded-full bg-red-600 border-2 border-white shadow-xl flex items-center justify-center text-xs animate-bounce">
+                ⚠️
+              </div>
+            `,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+          });
 
-        evacGroup.addTo(map);
-        layersRef.current.evacuation = evacGroup;
-      })
-      .catch(console.error);
-  }, [selectedWardId, layerVisibility.evacuationCorridors]);
+          L.marker(route.origin_point.coords, { icon: originIcon })
+            .bindPopup(`
+              <div style="font-size: 12px;">
+                <strong style="color: #ef4444;">Flooding Hazard Origin</strong><br/>
+                ${route.origin_point.name}<br/>
+                <span style="color: #94a3b8;">Evacuate via marked high-ground pathway</span>
+              </div>
+            `)
+            .addTo(evacGroup);
+
+          // Destination shelter popup trigger
+          const destIcon = L.divIcon({
+            className: 'evac-dest-icon',
+            html: `
+              <div class="w-9 h-9 rounded-xl bg-emerald-500 ring-4 ring-emerald-300/50 border-2 border-white shadow-2xl flex items-center justify-center text-base animate-pulse">
+                ⛺
+              </div>
+            `,
+            iconSize: [36, 36],
+            iconAnchor: [18, 18]
+          });
+
+          L.marker(route.destination_shelter.coords, { icon: destIcon })
+            .bindPopup(`
+              <div style="font-size: 12px;">
+                <strong style="color: #10b981; font-size: 13px;">Designated Relief Shelter (Destination)</strong><br/>
+                ${route.destination_shelter.name}<br/>
+                Distance: <strong>${route.distance_m}m (~${route.est_evacuation_time_mins} min walk)</strong><br/>
+                Elevation Gain: <strong style="color: #38bdf8;">+${route.elevation_gain_m}m above flood level</strong>
+              </div>
+            `)
+            .addTo(evacGroup)
+            .openPopup();
+        })
+        .catch(console.error);
+    } else {
+      setActiveEvacuationInfo(null);
+    }
+
+    evacGroup.addTo(map);
+    layersRef.current.evacuation = evacGroup;
+  }, [selectedWardId, layerVisibility.evacuationCorridors, riskZones, activeScenario]);
 
   // 7. Render River Gauges & AWS Stations
   useEffect(() => {
@@ -584,6 +724,10 @@ export default function MapView({
 
     map.flyTo([item.lat, item.lon], 15, { duration: 1.2 });
 
+    if (onLocationChange) {
+      onLocationChange({ lat: item.lat, lon: item.lon, name: item.title });
+    }
+
     const locId = item.ward_id || `loc_${item.lat}_${item.lon}_${encodeURIComponent(item.title)}`;
     onSelectWard(locId);
 
@@ -601,9 +745,11 @@ export default function MapView({
       iconAnchor: [60, 40]
     });
 
-    L.marker([item.lat, item.lon], { icon: pinIcon })
-      .addTo(map)
-      .bindPopup(`
+    const searchMarker = L.marker([item.lat, item.lon], { icon: pinIcon })
+      .addTo(map);
+    lastSearchPinRef.current = { item, marker: searchMarker };
+
+    searchMarker.bindPopup(`
         <div style="font-size: 12px; padding: 4px;">
           <strong style="color: #38bdf8; font-size: 13px;">${item.title}</strong><br/>
           <span style="color: #94a3b8;">${item.subtitle}</span><br/>
@@ -650,18 +796,34 @@ export default function MapView({
                 iconAnchor: [12, 12]
               });
 
-              L.marker([latitude, longitude], { icon: gpsIcon })
-                .addTo(map)
-                .bindPopup(`
-                  <div style="font-size: 12px; padding: 2px;">
-                    <strong style="color: #06b6d4; font-size: 13px;">📍 ${data.place_name || 'Your Location'}</strong><br/>
-                    GPS: <code>${latitude.toFixed(4)}, ${longitude.toFixed(4)}</code> (±${Math.round(accuracy)}m)<br/>
-                    Region: <strong>${data.city || 'Monitored Region'}</strong><br/>
-                    Status: <strong style="color: #22c55e;">${data.matched_flood_ward?.risk_level || 'Low'} (0 cm flood depth)</strong><br/>
-                    <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 3px;">${data.advice}</span>
-                  </div>
-                `)
-                .openPopup();
+              const riskLvl = data.matched_flood_ward?.risk_level || 'Low';
+              const depthCm = data.matched_flood_ward?.predicted_depth_cm ?? 0;
+              const riskColor = riskLvl === 'Severe' ? '#ef4444' : riskLvl === 'High' ? '#f97316' : riskLvl === 'Moderate' ? '#eab308' : '#22c55e';
+
+              const gpsMarker = L.marker([latitude, longitude], { icon: gpsIcon }).addTo(map);
+              lastGpsMarkerRef.current = {
+                marker: gpsMarker,
+                lat: latitude,
+                lon: longitude,
+                accuracy,
+                place_name: data.place_name,
+                city: data.city
+              };
+
+              const popupHtml = `
+                <div style="font-size: 12px; padding: 2px;">
+                  <strong style="color: #06b6d4; font-size: 13px;">📍 ${data.place_name || 'Your Location'}</strong><br/>
+                  GPS: <code>${latitude.toFixed(4)}, ${longitude.toFixed(4)}</code> (±${Math.round(accuracy)}m)<br/>
+                  Region: <strong>${data.city || 'Monitored Region'}</strong><br/>
+                  Status: <strong style="color: ${riskColor};">${riskLvl} (${depthCm} cm flood depth)</strong><br/>
+                  <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 3px;">${data.advice}</span>
+                </div>
+              `;
+              gpsMarker.bindPopup(popupHtml).openPopup();
+
+              if (onLocationChange) {
+                onLocationChange({ lat: latitude, lon: longitude, name: data.place_name || data.city || 'My Location' });
+              }
 
               if (data.loc_id) {
                 onSelectWard(data.loc_id);
@@ -677,6 +839,63 @@ export default function MapView({
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
   };
+
+  // Synchronize GPS & search markers when scenario changes
+  useEffect(() => {
+    if (lastGpsMarkerRef.current?.marker) {
+      const { marker, lat, lon, accuracy, place_name, city } = lastGpsMarkerRef.current;
+      fetch(`/api/location/reverse?lat=${lat}&lon=${lon}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data?.matched_flood_ward) {
+            const riskLvl = data.matched_flood_ward.risk_level || 'Low';
+            const depthCm = data.matched_flood_ward.predicted_depth_cm ?? 0;
+            const riskColor = riskLvl === 'Severe' ? '#ef4444' : riskLvl === 'High' ? '#f97316' : riskLvl === 'Moderate' ? '#eab308' : '#22c55e';
+            const updated = `
+              <div style="font-size: 12px; padding: 2px;">
+                <strong style="color: #06b6d4; font-size: 13px;">📍 ${data.place_name || place_name || 'Your Location'}</strong><br/>
+                GPS: <code>${lat.toFixed(4)}, ${lon.toFixed(4)}</code> (±${Math.round(accuracy)}m)<br/>
+                Region: <strong>${data.city || city || 'Monitored Region'}</strong><br/>
+                Status: <strong style="color: ${riskColor};">${riskLvl} (${depthCm} cm flood depth)</strong><br/>
+                <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 3px;">${data.advice}</span>
+              </div>
+            `;
+            marker.bindPopup(updated);
+            if (marker.isPopupOpen()) {
+              marker.setPopupContent(updated);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (lastSearchPinRef.current?.marker) {
+      const { marker, item } = lastSearchPinRef.current;
+      fetch(`/api/location/reverse?lat=${item.lat}&lon=${item.lon}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data?.matched_flood_ward) {
+            const riskLvl = data.matched_flood_ward.risk_level || 'Low';
+            const depthCm = data.matched_flood_ward.predicted_depth_cm ?? 0;
+            const riskColor = riskLvl === 'Severe' ? '#ef4444' : riskLvl === 'High' ? '#f97316' : riskLvl === 'Moderate' ? '#eab308' : '#22c55e';
+            const updated = `
+              <div style="font-size: 12px; padding: 4px;">
+                <strong style="color: #38bdf8; font-size: 13px;">${item.title}</strong><br/>
+                <span style="color: #94a3b8;">${item.subtitle}</span><br/>
+                Source: <strong style="color: #a855f7;">${item.source}</strong><br/>
+                Flood Risk: <strong style="color: ${riskColor};">${riskLvl} (${data.matched_flood_ward.risk_score || 0}/100)</strong><br/>
+                Est. Water Depth: <strong>${depthCm} cm</strong>
+              </div>
+            `;
+            marker.bindPopup(updated);
+            if (marker.isPopupOpen()) {
+              marker.setPopupContent(updated);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeScenario]);
 
   const fallbackLocate = (reason) => {
     setIsLocating(false);
@@ -694,6 +913,9 @@ export default function MapView({
   const handleResetView = () => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.flyTo([19.065, 72.875], 13, { duration: 0.8 });
+    }
+    if (onLocationChange) {
+      onLocationChange({ lat: 19.076, lon: 72.877, name: 'Mumbai Metropolitan Basin' });
     }
   };
 
@@ -1079,20 +1301,29 @@ export default function MapView({
             <span className="text-[10px] text-red-400 font-bold font-mono">54.5 dBZ</span>
           </div>
 
-          {/* Live Open-Meteo Telemetry Badge */}
+          {/* Live OpenWeatherMap Telemetry Badge */}
           {liveMet && (
-            <div className="bg-slate-950 p-1.5 rounded-lg border border-slate-800/80 text-[10px] text-slate-400 flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <Thermometer className="w-3 h-3 text-amber-400" />
-                <span>{liveMet.current_temperature_c}°C</span>
+            <div className="bg-slate-950 p-2 rounded-xl border border-slate-800/90 text-[10px] text-slate-300 space-y-1 shadow-inner">
+              <div className="flex items-center justify-between text-[9px] border-b border-slate-800/80 pb-1">
+                <span className="text-orange-400 font-bold flex items-center gap-1 truncate">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+                  {liveMet.provider || 'OpenWeather Live Feed'}
+                </span>
+                <span className="text-slate-400 font-mono shrink-0">{liveMet.city_name || 'Live'}</span>
               </div>
-              <div className="flex items-center gap-1">
-                <CloudRain className="w-3 h-3 text-sky-400" />
-                <span>{liveMet.current_precipitation_mm}mm/h</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Wind className="w-3 h-3 text-cyan-400" />
-                <span>{liveMet.wind_speed_kmh}km/h</span>
+              <div className="flex items-center justify-between pt-0.5">
+                <div className="flex items-center gap-1" title="Current Ambient Temperature">
+                  <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="font-bold text-white">{liveMet.temp_c ?? liveMet.current_temperature_c}°C</span>
+                </div>
+                <div className="flex items-center gap-1" title="Real-time Precipitation Rate">
+                  <CloudRain className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="font-bold text-sky-300">{liveMet.rain_1h_mm ?? liveMet.current_precipitation_mm ?? 0} mm/h</span>
+                </div>
+                <div className="flex items-center gap-1" title="Surface Wind Speed">
+                  <Wind className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{liveMet.wind_speed_kmh} km/h</span>
+                </div>
               </div>
             </div>
           )}

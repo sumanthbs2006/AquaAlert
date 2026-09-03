@@ -31,6 +31,7 @@ import { getTranslation } from '../i18n';
 export default function AreaDetailDrawer({ 
   wardId, 
   onClose,
+  activeScenario,
   activeScenarioName,
   currentLang = 'en'
 }) {
@@ -56,7 +57,7 @@ export default function AreaDetailDrawer({
         console.error('Error fetching ward forecast:', err);
         setLoading(false);
       });
-  }, [wardId]);
+  }, [wardId, activeScenario?.id, activeScenarioName]);
 
   if (!wardId) return null;
 
@@ -97,6 +98,12 @@ export default function AreaDetailDrawer({
           <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 truncate">
             Zone: {ward?.zone} | Pop: {ward?.population?.toLocaleString()}
           </p>
+          {forecastData?.is_outside_basin && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 w-fit">
+              <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span>Outside Mumbai Pilot Basin &bull; Live Regional Weather</span>
+            </div>
+          )}
         </div>
 
         <button
@@ -308,33 +315,52 @@ export default function AreaDetailDrawer({
           </div>
 
           {/* Nearest Emergency Shelter & Evacuation */}
-          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
-            <h3 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Navigation className="w-3.5 h-3.5 text-emerald-400" />
-              {t.designatedShelter}
-            </h3>
-            <div className="bg-emerald-950/40 border border-emerald-800/50 p-2.5 rounded-lg">
-              <div className="flex items-center justify-between">
-                <strong className="text-xs text-emerald-300 font-bold">
-                  {ward?.nearest_shelter?.name}
-                </strong>
-                <span className="text-[10px] bg-emerald-800/80 text-emerald-200 px-1.5 py-0.5 rounded font-mono">
-                  {t.capacity}: {ward?.nearest_shelter?.capacity}
-                </span>
+          {ward?.nearest_shelter ? (
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+              <h3 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                {t.designatedShelter}
+              </h3>
+              <div className="bg-emerald-950/40 border border-emerald-800/50 p-2.5 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <strong className="text-xs text-emerald-300 font-bold">
+                    {ward?.nearest_shelter?.name}
+                  </strong>
+                  <span className="text-[10px] bg-emerald-800/80 text-emerald-200 px-1.5 py-0.5 rounded font-mono">
+                    {t.capacity}: {ward?.nearest_shelter?.capacity}
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-400/90 mt-1">
+                  Occupancy: {ward?.nearest_shelter?.occupied} / {ward?.nearest_shelter?.capacity} beds occupied (Open for public admission)
+                </p>
               </div>
-              <p className="text-[11px] text-emerald-400/90 mt-1">
-                Occupancy: {ward?.nearest_shelter?.occupied} / {ward?.nearest_shelter?.capacity} beds occupied (Open for public admission)
-              </p>
+              
+              <a
+                href="tel:1916"
+                className="w-full py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-colors shadow-lg"
+              >
+                <PhoneCall className="w-3.5 h-3.5" />
+                Dial Disaster Control Room (1916 / 112)
+              </a>
             </div>
-            
-            <a
-              href="tel:1916"
-              className="w-full py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-colors shadow-lg"
-            >
-              <PhoneCall className="w-3.5 h-3.5" />
-              Dial Disaster Control Room (1916 / 112)
-            </a>
-          </div>
+          ) : (
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <ShieldCheck className="w-4 h-4" />
+                <span className="text-xs font-bold">Safe Operations Zone</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                {forecastData?.evacuation_advice?.advisory_notes || "Normal municipal operations active. No emergency flood evacuation required."}
+              </p>
+              <a
+                href="tel:112"
+                className="w-full py-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-colors border border-slate-700/80"
+              >
+                <PhoneCall className="w-3.5 h-3.5" />
+                National Emergency Helpline (112)
+              </a>
+            </div>
+          )}
         </div>
       )}
     </aside>

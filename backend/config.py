@@ -31,6 +31,7 @@ _load_env()
 
 CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")
 MAPPLS_REST_KEY = os.environ.get("MAPPLS_REST_KEY", "")
+OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "a8e781c27ffac99e8d41e324ef9fd544")
 
 # CARTO Basemap Styles with authenticated tile URL templates
 CARTO_BASEMAPS = {

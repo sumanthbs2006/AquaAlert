@@ -4,10 +4,10 @@ Provides real-time telemetry from Automated Weather Stations (AWS),
 Doppler Weather Radars (DWR), River & Canal Gauges, and crisis scenario selection.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException, Query
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from backend.database import SENSOR_STATIONS
+from backend.database import SENSOR_STATIONS, generate_regional_sensors
 from backend.ingestion import ingestion_manager
 
 router = APIRouter(prefix="/api", tags=["Sensors & Telemetry"])
@@ -16,18 +16,29 @@ class ScenarioSelectRequest(BaseModel):
     scenario_id: str
 
 @router.get("/sensors")
-def get_sensors():
+def get_sensors(
+    lat: Optional[float] = Query(None, description="Center latitude"),
+    lon: Optional[float] = Query(None, description="Center longitude"),
+    name: Optional[str] = Query(None, description="Name of searched location")
+):
     """
-    Returns full sensor telemetry network with readings calibrated
+    Returns sensor telemetry network with readings calibrated
     to the currently active hydrometeorological scenario.
+    If lat and lon are provided outside Mumbai, dynamically generates regional sensors!
     """
     scenario = ingestion_manager.get_current_scenario()
     params = scenario["params"]
     multiplier = params.get("rain_intensity_multiplier", 1.0)
     surge_m = params.get("river_surge_m", 0.0)
 
+    sensor_list = SENSOR_STATIONS
+    if lat is not None and lon is not None:
+        min_d = min(((lat - s["lat"])**2 + (lon - s["lon"])**2)**0.5 for s in SENSOR_STATIONS)
+        if min_d > 0.22:
+            sensor_list = generate_regional_sensors(lat, lon, name or "Searched Location")
+
     calibrated_sensors = []
-    for s in SENSOR_STATIONS:
+    for s in sensor_list:
         item = dict(s)
         if s["type"] == "aws":
             item["current_rain_mm_hr"] = round(s["current_rain_mm_hr"] * multiplier, 1)
