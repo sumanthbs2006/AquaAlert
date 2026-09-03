@@ -15,7 +15,7 @@ from backend.ingestion import ingestion_manager
 router = APIRouter(prefix="/api/location", tags=["Location & Geocoding"])
 
 # Mappls Developer API Key (Configurable via environment or default key)
-MAPPLS_REST_KEY = os.environ.get("MAPPLS_REST_KEY", "fqvwsojmskemotqiaktsmxmflbxondqyewit")
+MAPPLS_REST_KEY = os.environ.get("MAPPLS_REST_KEY", "")
 
 @router.get("/search")
 def search_location(

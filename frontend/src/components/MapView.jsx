@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { getTranslation } from '../i18n';
 
-const CARTO_KEY = 'cb1_2q7o_1_86507cbdf8df02dd8371bebb';
+const CARTO_KEY = import.meta.env.VITE_CARTO_API_KEY || '';
 
 const BASEMAP_TILES = {
   dark_matter: {
