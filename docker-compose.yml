@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. AquaAlert AI Backend API & ML Ingestion Engine
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: aquaalert-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - CARTO_API_KEY=${CARTO_API_KEY}
+      - MAPPLS_REST_KEY=${MAPPLS_REST_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./aquaalert.db}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend:/app/backend
+      - ./.env:/app/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 2. PostGIS Enterprise Database (Optional for scaled deployments)
+  postgis:
+    image: postgis/postgis:15-3.3
+    container_name: aquaalert-postgis
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=aquaalert
+      - POSTGRES_USER=aquaadmin
+      - POSTGRES_PASSWORD=aquaalert_secure_pass
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # 3. AquaAlert AI Frontend GIS Dashboard
+  frontend:
+    image: node:20-alpine
+    container_name: aquaalert-frontend
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgis_data:
