@@ -1,0 +1,11 @@
+{
+  "name": "aquaalert-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  }
+}
