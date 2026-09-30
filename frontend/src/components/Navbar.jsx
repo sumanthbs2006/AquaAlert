@@ -3,8 +3,6 @@ import {
   ShieldAlert, 
   MapPin, 
   BellRing, 
-  Activity, 
-  Info, 
   PhoneCall, 
   Radio, 
   UserCheck, 
@@ -82,11 +80,6 @@ export default function Navbar({
               {t.riverStage}: <strong className={sensorsSummary?.peak_river_danger_status === 'DANGER' ? 'text-red-400' : 'text-amber-300'}>
                 {sensorsSummary?.peak_river_danger_status ?? 'WARNING'}
               </strong>
-            </span>
-            <span className="hidden md:inline text-slate-600">|</span>
-            <span className="hidden md:flex items-center gap-1.5 text-orange-300 font-medium text-[11px]">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
-              <span>Live Met: <strong>OpenWeatherMap API</strong></span>
             </span>
           </div>
 
@@ -174,30 +167,6 @@ export default function Navbar({
             <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full animate-pulse">
               3
             </span>
-          </button>
-
-          <button
-            onClick={() => handleNavClick('admin')}
-            className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 ${
-              currentPage === 'admin'
-                ? 'bg-red-500/15 text-red-400 border border-red-500/30'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            {t.controlRoom}
-          </button>
-
-          <button
-            onClick={() => handleNavClick('about')}
-            className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 ${
-              currentPage === 'about'
-                ? 'bg-slate-800 text-white border border-slate-700'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Info className="w-4 h-4" />
-            {t.architecture}
           </button>
         </nav>
 
@@ -289,30 +258,6 @@ export default function Navbar({
               <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
                 3
               </span>
-            </button>
-
-            <button
-              onClick={() => handleNavClick('admin')}
-              className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                currentPage === 'admin'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              <Activity className="w-4 h-4" />
-              {t.controlRoom}
-            </button>
-
-            <button
-              onClick={() => handleNavClick('about')}
-              className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                currentPage === 'about'
-                  ? 'bg-slate-700 text-white'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              <Info className="w-4 h-4" />
-              {t.architecture}
             </button>
           </div>
 
