@@ -15,7 +15,7 @@ for _p in [_parent_dir, _current_dir]:
         sys.path.insert(0, _p)
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
 
@@ -80,6 +80,18 @@ def favicon():
     if os.path.exists(fav_file):
         return FileResponse(fav_file)
     return FileResponse(os.path.join(frontend_dist, "index.html"))
+
+@app.get("/HUH.mp4")
+def get_huh_video():
+    candidate_paths = [
+        os.path.join(_parent_dir, "HUH.mp4"),
+        os.path.join(frontend_dist, "HUH.mp4"),
+        os.path.join(_parent_dir, "frontend", "public", "HUH.mp4"),
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="video/mp4")
+    raise HTTPException(status_code=404, detail="HUH.mp4 not found")
 
 @app.get("/api/health")
 def health_check():

@@ -40,7 +40,7 @@ pnpm-debug.log*
 # Cloudflare binary & Tunnel runtime output
 cloudflared.exe
 cloudflared
-scratch/public_url.txt
+scratch/
 *.tunnel.txt
 
 # Editor & IDE configs

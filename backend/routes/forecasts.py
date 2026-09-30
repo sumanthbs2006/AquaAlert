@@ -15,7 +15,8 @@ from backend.database import (
     generate_regional_wards, 
     estimate_base_elevation,
     get_active_alert_for_location,
-    get_alert_crisis_params
+    get_alert_crisis_params,
+    get_calamity_proximity_info
 )
 from backend.ml_engine import ml_engine
 from backend.ingestion import ingestion_manager
@@ -56,8 +57,22 @@ def get_risk_zones_geojson(
         if min_d > 0.22:
             wards = generate_regional_wards(lat, lon, name or "Searched Location")
 
-    # If the user is inspecting an active alert zone, synchronize the risk parameters with the active alert!
-    if active_alert:
+    # Synchronize simulation parameters: prioritize live weather observations when in live_weather mode!
+    if scenario.get("id") == "live_weather":
+        if lat is not None and lon is not None:
+            live_w = get_live_weather(lat, lon)
+            live_rain = float(live_w.get("rain_1h_mm", 0.0) or 0.0)
+            run_params = {
+                "rain_intensity_multiplier": live_rain / 45.0 if live_rain > 0 else 0.0,
+                "soil_saturation_delta": -35.0 if live_rain == 0 else 5.0,
+                "river_surge_m": -0.8 if live_rain == 0 else 0.1,
+                "radar_peak_dbz": 15.0 if live_rain == 0 else min(55.0, 10 * float(np.log10(max(200 * (live_rain ** 1.6), 1)))),
+                "tidal_level_m": 0.2
+            }
+        else:
+            run_params = scenario.get("params")
+        scenario_title = "Live Weather Observations"
+    elif active_alert:
         run_params = get_alert_crisis_params(active_alert)
         scenario_title = f"Active CAP Advisory: {active_alert.get('headline', active_alert.get('event', 'Emergency Alert'))}"
     else:
@@ -68,6 +83,41 @@ def get_risk_zones_geojson(
     for ward in wards:
         # Run ML engine prediction for this ward
         pred = ml_engine.predict_ward_risk(ward, run_params)
+
+        # Calamity proximity analysis for this ward
+        w_center = ward.get("center", [lat or 19.076, lon or 72.877])
+        prox = get_calamity_proximity_info(w_center[0], w_center[1], ward.get("name", ""), ward.get("id", ""))
+        z_type = prox.get("zone_type", "none")
+        c_dist = prox.get("distance_km", 999.0)
+
+        if z_type == "calamity_epicenter":
+            # Calamity epicenter zone: Severe risk!
+            pred["risk_level"] = "Severe"
+            pred["risk_score"] = round(max(86.5, 92.0 - c_dist * 0.4), 1)
+            pred["predicted_depth_cm"] = round(max(40.0, 54.0 - c_dist * 0.8), 1)
+            pred["depth_range_cm"] = "40 - 65 cm"
+            pred["rainfall_nowcast_6h_mm"] = 38.5
+        elif z_type == "calamity_near":
+            # Areas near calamity zone: Moderate risk!
+            pred["risk_level"] = "Moderate"
+            pred["risk_score"] = round(48.0 - (c_dist - 15.0) * 0.45, 1)
+            pred["predicted_depth_cm"] = round(max(10.0, 20.0 - (c_dist - 15.0) * 0.35), 1)
+            pred["depth_range_cm"] = "12 - 25 cm (Sump Pooling)"
+            pred["rainfall_nowcast_6h_mm"] = 18.0
+        elif z_type == "calamity_peripheral":
+            # Outer peripheral buffer: Low risk with slight elevation
+            pred["risk_level"] = "Low"
+            pred["risk_score"] = round(28.0 - (c_dist - 42.0) * 0.15, 1)
+            pred["predicted_depth_cm"] = round(max(0.0, 5.0 - (c_dist - 42.0) * 0.15), 1)
+            pred["depth_range_cm"] = "0 - 5 cm (Peripheral Watch)"
+            pred["rainfall_nowcast_6h_mm"] = 5.0
+        elif scenario.get("id") == "live_weather" and run_params.get("rain_intensity_multiplier", 0.0) == 0.0:
+            # Areas with no calamity and zero rainfall: Safe & Clear!
+            pred["risk_score"] = round(min(float(pred.get("risk_score", 11.5)), 14.0), 1)
+            pred["risk_level"] = "Low"
+            pred["predicted_depth_cm"] = 0.0
+            pred["depth_range_cm"] = "0 cm (Safe & Clear)"
+            pred["rainfall_nowcast_6h_mm"] = 0.0
 
         # Map risk level to standard disaster color palette
         color_map = {
@@ -166,13 +216,13 @@ def get_ward_forecast(ward_id: str):
             # Generate realistic topographical parameters for arbitrary inspected coordinate point
             base_elev = estimate_base_elevation(lat, lon)
             name_lower = name.lower()
-            is_lowland = any(w in name_lower for w in ["low", "underpass", "chawl", "slum", "lake", "basin", "river", "canal", "road", "main"])
+            is_lowland = any(w in name_lower for w in ["underpass", "subway", "nullah", "culvert", "creek", "riverbank", "lakebed", "marsh", "swamp", "khadi"])
             is_highland = any(w in name_lower for w in ["hill", "ridge", "high", "heights", "peak", "plateau", "mount"])
             
-            p_slope = 3.5 if is_highland else (0.7 if is_lowland else 1.6)
-            p_elev = 18.0 if is_highland else (2.8 if is_lowland else 6.5)
+            p_slope = 3.5 if is_highland else (0.8 if is_lowland else 1.6)
+            p_elev = max(base_elev + 20.0, 30.0) if is_highland else (max(base_elev - 4.0, 5.0) if is_lowland else max(base_elev, 15.0))
             p_imperv = 60.0 if is_highland else (86.0 if is_lowland else 75.0)
-            p_drain = 65.0 if is_highland else (32.0 if is_lowland else 48.0)
+            p_drain = 65.0 if is_highland else (40.0 if is_lowland else 55.0)
             
             ward = {
                 "id": ward_id,
@@ -185,11 +235,11 @@ def get_ward_forecast(ward_id: str):
                 "terrain_slope_deg": p_slope,
                 "impervious_surface_pct": p_imperv,
                 "drainage_density_idx": p_drain,
-                "antecedent_moisture_pct": 85.0 if is_lowland else 72.0,
-                "historical_waterlogging_frequency": "Very High" if is_lowland else ("Low" if is_highland else "Moderate"),
+                "antecedent_moisture_pct": 55.0 if is_lowland else 45.0,
+                "historical_waterlogging_frequency": "Moderate" if is_lowland else "Low",
                 "center": [lat, lon],
                 "vulnerable_assets": [
-                    {"name": f"Local Infrastructure near {name.split(',')[0]}", "type": "transit", "lat": lat, "lon": lon, "vulnerability": "Severe" if is_lowland else "Moderate"}
+                    {"name": f"Local Infrastructure near {name.split(',')[0]}", "type": "transit", "lat": lat, "lon": lon, "vulnerability": "Moderate" if is_lowland else "Low"}
                 ],
                 "nearest_shelter": {"name": f"{name.split(',')[0]} Municipal Relief Shelter", "lat": round(lat + 0.005, 4), "lon": round(lon + 0.005, 4), "capacity": 750, "occupied": 10}
             }
@@ -213,111 +263,47 @@ def get_ward_forecast(ward_id: str):
             "inundation_time_window": active_alert.get("inundation_time_window")
         }
 
-    if is_out:
-        if active_alert:
-            # Active Emergency Warning Zone: Synchronize directly with CAP Disaster Advisory
-            alert_params = get_alert_crisis_params(active_alert)
-            pred = ml_engine.predict_ward_risk(ward, alert_params)
-            sev = active_alert.get("severity", "Severe").capitalize()
+    prox_info = get_calamity_proximity_info(lat, lon, name, ward_id)
+    calamity_zone = prox_info.get("zone_type", "none")
+    calamity_alert = prox_info.get("alert") or active_alert
+    calamity_dist_km = prox_info.get("distance_km", 999.0)
 
-            if sev == "Severe":
-                nowcast_6h = 38.5
-                alert_depth = 54.0
-                alert_depth_range = "40 - 65 cm"
-                peak_hr = "T+2 hrs"
-                pred["risk_level"] = "Severe"
-                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 86.5), 1)
-            elif sev == "High":
-                nowcast_6h = 28.0
-                alert_depth = 38.0
-                alert_depth_range = "30 - 50 cm"
-                peak_hr = "T+2 hrs"
-                pred["risk_level"] = "High"
-                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 72.0), 1)
-            else:
-                nowcast_6h = 12.0
-                alert_depth = 18.0
-                alert_depth_range = "15 - 25 cm"
-                peak_hr = "T+3 hrs"
-                pred["risk_level"] = "Moderate"
-                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 48.0), 1)
+    if sc_id == "live_weather":
+        if calamity_zone == "calamity_epicenter":
+            # Calamity epicenter zone: Severe risk! (e.g. Patna, Dehradun)
+            alert = calamity_alert or {
+                "headline": "RED ALERT: Severe Calamity & Inundation Zone",
+                "instruction": "Active RED ALERT flood advisory. Evacuate lowlands.",
+                "state": "Regional",
+                "event": "Torrential Downpour & Flash Inundation"
+            }
+            risk_score = round(max(86.5, 92.0 - calamity_dist_km * 0.35), 1)
+            risk_level = "Severe"
+            pred_depth = round(max(42.0, 56.0 - calamity_dist_km * 0.7), 1)
+            depth_range = "40 - 65 cm"
+            uncertainty_margin = 6.5
+            confidence_pct = 89.5
+            nowcast_6h = 38.5
+            peak_hr = "T+1 hr (Severe Convective Bursts)"
 
             hourly_series = []
             for h in range(1, 25):
-                h_rain = round(nowcast_6h * 0.35, 1) if h <= 2 else (round(nowcast_6h * 0.2, 1) if h <= 5 else 0.5)
-                h_depth = alert_depth if (2 <= h <= 6) else (round(alert_depth * 0.7, 1) if h <= 10 else round(alert_depth * 0.3, 1))
+                h_rain = round(nowcast_6h * 0.35, 1) if h <= 2 else (round(nowcast_6h * 0.2, 1) if h <= 5 else 0.8)
+                h_depth = pred_depth if (2 <= h <= 6) else (round(pred_depth * 0.75, 1) if h <= 10 else round(pred_depth * 0.35, 1))
                 hourly_series.append({
                     "hour": f"+{h}h",
                     "time_label": f"T+{h:02d}:00",
                     "rainfall_mm": h_rain,
                     "inundation_depth_cm": h_depth,
-                    "river_level_m": round(alert_params["river_surge_m"] + 0.3, 2)
+                    "river_level_m": 1.45
                 })
 
             xai_factors = [
-                {"factor_key": "active_alert", "label": f"{active_alert.get('event', 'Active Emergency Flood Directive')}", "contribution_pct": 45},
-                {"factor_key": "radar_reflectivity_dbz", "label": f"DWR Radar Reflectivity ({alert_params['radar_peak_dbz']} dBZ)", "contribution_pct": 25},
-                {"factor_key": "river_gauge_ratio", "label": f"Foothill River / Torrent Runoff Surge (+{alert_params['river_surge_m']}m)", "contribution_pct": 18},
+                {"factor_key": "active_calamity", "label": f"Active SDMA Calamity Directive: {alert.get('headline')}", "contribution_pct": 45},
+                {"factor_key": "flood_surge", "label": f"Severe Flash Inundation Runoff ({alert.get('event', 'Torrential Flood')})", "contribution_pct": 26},
+                {"factor_key": "elevation_m", "label": f"Lowland Basin Elevation ({ward['avg_elevation_m']}m MSL)", "contribution_pct": 17},
                 {"factor_key": "drainage_constriction_idx", "label": "Lowland Culvert & Outfall Surcharge", "contribution_pct": 12}
             ]
-
-            pred["predicted_depth_cm"] = alert_depth
-            pred["depth_range_cm"] = alert_depth_range
-            pred["rainfall_nowcast_6h_mm"] = nowcast_6h
-            pred["peak_rainfall_hr"] = peak_hr
-            pred["explainability_factors"] = xai_factors
-            pred["hourly_forecast"] = hourly_series
-            pred["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-            scenario_name = f"Active CAP Warning ({active_alert.get('state', 'Regional')} SDMA)"
-            evacuation_advice = {
-                "is_evacuation_recommended": True if pred["risk_level"] in ["High", "Severe"] else False,
-                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
-                "shelter_distance_approx": "580m",
-                "advisory_notes": active_alert.get("instruction") or f"Active {active_alert.get('severity')} flood advisory issued by State Disaster Management Authority."
-            }
-        elif sc_id == "live_weather":
-            # Real-time atmospheric measurements from OpenWeatherMap (with resilient gateway fallback)
-            live_data = get_live_weather(lat, lon)
-            live_rain = float(live_data.get("rain_1h_mm", 0.0) or 0.0)
-            live_temp = float(live_data.get("temp_c", 25.0) or 25.0)
-            live_humidity = float(live_data.get("humidity_pct", 65.0) or 65.0)
-            hourly_rain = [float(x) for x in live_data.get("hourly_precip_trend", [0.0] * 24)]
-
-            dynamic_params = {
-                "rain_intensity_multiplier": live_rain / 45.0 if live_rain > 0 else 0.0,
-                "soil_saturation_delta": (live_humidity - 65.0) * 0.3,
-                "river_surge_m": (live_rain * 0.03) if live_rain > 0 else -0.6,
-                "radar_peak_dbz": min(55.0, 10 * float(np.log10(max(200 * ((live_rain or 0.1) ** 1.6), 1)))),
-                "tidal_level_m": 0.3
-            }
-            pred = ml_engine.predict_ward_risk(ward, dynamic_params)
-            risk_score = pred["risk_score"]
-            risk_level = pred["risk_level"]
-            pred_depth = pred["predicted_depth_cm"]
-            depth_range = pred["depth_range_cm"]
-            uncertainty_margin = pred["uncertainty_margin_cm"]
-            confidence_pct = pred["confidence_pct"]
-            nowcast_6h = round(sum(hourly_rain[:6]), 1) if hourly_rain else 0.0
-            peak_hr = "Dry / Normal" if nowcast_6h == 0.0 else "T+2 hrs"
-
-            hourly_series = []
-            for h in range(1, 25):
-                h_rain = hourly_rain[h - 1] if (h - 1) < len(hourly_rain) else 0.0
-                hourly_series.append({
-                    "hour": f"+{h}h",
-                    "time_label": f"T+{h:02d}:00",
-                    "rainfall_mm": h_rain,
-                    "inundation_depth_cm": round(pred_depth * (0.8 if h > 6 else 1.0), 1),
-                    "river_level_m": 0.4
-                })
-
-            xai_factors = pred.get("explainability_factors", [
-                {"factor_key": "elevation_m", "label": f"Topographic Elevation ({ward['avg_elevation_m']}m)", "contribution_pct": 35},
-                {"factor_key": "terrain_slope_deg", "label": f"Terrain Runoff Slope ({ward['terrain_slope_deg']}°)", "contribution_pct": 30},
-                {"factor_key": "rain_1h_mm", "label": f"OpenWeather Live Precipitation ({live_rain} mm/h)", "contribution_pct": 20},
-                {"factor_key": "drainage_constriction_idx", "label": "Drainage Outfall Density", "contribution_pct": 15}
-            ])
 
             pred = {
                 "ward_id": ward_id,
@@ -334,42 +320,216 @@ def get_ward_forecast(ward_id: str):
                 "hourly_forecast": hourly_series,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            scenario_name = "Live Regional Weather (OpenWeather API)"
+            scenario_name = f"Active CAP Calamity ({alert.get('state', 'Regional')} SDMA)"
             evacuation_advice = {
-                "is_evacuation_recommended": pred["risk_level"] in ["High", "Severe"],
-                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else None,
+                "is_evacuation_recommended": True,
+                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
                 "shelter_distance_approx": "580m",
-                "advisory_notes": f"Real-time conditions in {ward['name']}. Topographic baseline vulnerability index: {risk_score}/100. Monitored via OpenWeather atmospheric feeds."
+                "advisory_notes": alert.get("instruction") or f"Active RED ALERT flood advisory issued by {alert.get('state', 'State')} Disaster Management Authority."
             }
-        elif sc_id == "dry_baseline":
-            # Dry Weather Baseline: Run ML prediction for this specific ward with 0 rain
-            pred = ml_engine.predict_ward_risk(ward, scenario.get("params"))
-            scenario_name = "Dry Weather / Baseline"
+
+        elif calamity_zone == "calamity_near":
+            # Areas near calamity zone: Moderate risk! (~15-42 km buffer)
+            alert = calamity_alert or {"state": "Regional", "event": "Disaster Inundation"}
+            risk_score = round(max(36.0, 48.0 - (calamity_dist_km - 15.0) * 0.45), 1)
+            risk_level = "Moderate"
+            pred_depth = round(max(10.0, 20.0 - (calamity_dist_km - 15.0) * 0.35), 1)
+            depth_range = "12 - 25 cm (Sump Pooling)"
+            uncertainty_margin = 4.2
+            confidence_pct = 82.0
+            nowcast_6h = round(max(12.0, 22.0 - (calamity_dist_km - 15.0) * 0.35), 1)
+            peak_hr = "T+2 hrs"
+
+            hourly_series = []
+            for h in range(1, 25):
+                h_rain = round(nowcast_6h * 0.25, 1) if h <= 3 else (round(nowcast_6h * 0.15, 1) if h <= 6 else 0.2)
+                h_depth = pred_depth if (2 <= h <= 5) else (round(pred_depth * 0.6, 1) if h <= 8 else 0.0)
+                hourly_series.append({
+                    "hour": f"+{h}h",
+                    "time_label": f"T+{h:02d}:00",
+                    "rainfall_mm": h_rain,
+                    "inundation_depth_cm": h_depth,
+                    "river_level_m": 0.65
+                })
+
+            xai_factors = [
+                {"factor_key": "calamity_buffer", "label": f"Proximity to Active Calamity Zone (~{round(calamity_dist_km)} km to {alert.get('state')} Epicenter)", "contribution_pct": 42},
+                {"factor_key": "regional_inflow", "label": "Regional Inundation Buffer & Hydrological Inflow", "contribution_pct": 26},
+                {"factor_key": "terrain_slope_deg", "label": f"Terrain Runoff Slope ({ward['terrain_slope_deg']}°) & Outfall Flow", "contribution_pct": 18},
+                {"factor_key": "drainage_constriction_idx", "label": "Local Urban Stormwater Density", "contribution_pct": 14}
+            ]
+
+            pred = {
+                "ward_id": ward_id,
+                "ward_name": ward["name"],
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "predicted_depth_cm": pred_depth,
+                "depth_range_cm": depth_range,
+                "uncertainty_margin_cm": uncertainty_margin,
+                "confidence_pct": confidence_pct,
+                "rainfall_nowcast_6h_mm": nowcast_6h,
+                "peak_rainfall_hr": peak_hr,
+                "explainability_factors": xai_factors,
+                "hourly_forecast": hourly_series,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            scenario_name = f"Adjoining Calamity Buffer (~{round(calamity_dist_km)} km from {alert.get('state')} Calamity)"
+            evacuation_advice = {
+                "is_evacuation_recommended": False,
+                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
+                "shelter_distance_approx": "580m",
+                "advisory_notes": f"Cautionary Standby: Location is within the ~{round(calamity_dist_km)} km perimeter of active {alert.get('event')}. Be prepared for street runoff."
+            }
+
+        elif calamity_zone == "calamity_peripheral":
+            # Outer peripheral buffer: Low-Moderate risk (~42-75 km buffer)
+            alert = calamity_alert or {"state": "Regional"}
+            risk_score = round(max(22.0, 28.0 - (calamity_dist_km - 42.0) * 0.15), 1)
+            risk_level = "Low"
+            pred_depth = round(max(0.0, 5.0 - (calamity_dist_km - 42.0) * 0.15), 1)
+            depth_range = "0 - 5 cm (Peripheral Watch)"
+            uncertainty_margin = 3.0
+            confidence_pct = 80.0
+            nowcast_6h = 4.0
+            peak_hr = "T+3 hrs"
+
+            hourly_series = []
+            for h in range(1, 25):
+                hourly_series.append({
+                    "hour": f"+{h}h",
+                    "time_label": f"T+{h:02d}:00",
+                    "rainfall_mm": 0.5 if h <= 4 else 0.0,
+                    "inundation_depth_cm": pred_depth if h <= 4 else 0.0,
+                    "river_level_m": 0.35
+                })
+
+            xai_factors = [
+                {"factor_key": "peripheral_watch", "label": f"Peripheral Monitoring Buffer (~{round(calamity_dist_km)} km to {alert.get('state')} Alert)", "contribution_pct": 35},
+                {"factor_key": "drainage", "label": "Topographic Runoff Drainage", "contribution_pct": 30},
+                {"factor_key": "elevation_m", "label": f"Elevation ({ward['avg_elevation_m']}m MSL)", "contribution_pct": 20},
+                {"factor_key": "moisture", "label": "Low Antecedent Moisture", "contribution_pct": 15}
+            ]
+
+            pred = {
+                "ward_id": ward_id,
+                "ward_name": ward["name"],
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "predicted_depth_cm": pred_depth,
+                "depth_range_cm": depth_range,
+                "uncertainty_margin_cm": uncertainty_margin,
+                "confidence_pct": confidence_pct,
+                "rainfall_nowcast_6h_mm": nowcast_6h,
+                "peak_rainfall_hr": peak_hr,
+                "explainability_factors": xai_factors,
+                "hourly_forecast": hourly_series,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            scenario_name = f"Peripheral Calamity Watch (~{round(calamity_dist_km)} km)"
+            evacuation_advice = {
+                "is_evacuation_recommended": False,
+                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
+                "shelter_distance_approx": "580m",
+                "advisory_notes": f"Peripheral monitoring buffer ~{round(calamity_dist_km)} km from active disaster zone in {alert.get('state')}. Conditions stable."
+            }
+
+        else:
+            # Normal territory: check live atmospheric measurements from Open-Meteo & OpenWeather
+            live_data = get_live_weather(lat, lon)
+            live_rain = float(live_data.get("rain_1h_mm", 0.0) or 0.0)
+            live_temp = float(live_data.get("temp_c", 25.0) or 25.0)
+            live_humidity = float(live_data.get("humidity_pct", 65.0) or 65.0)
+            hourly_rain = [float(x) for x in live_data.get("hourly_precip_trend", [0.0] * 24)]
+
+            dynamic_params = {
+                "rain_intensity_multiplier": live_rain / 45.0 if live_rain > 0 else 0.0,
+                "soil_saturation_delta": -35.0 if live_rain == 0 else (live_humidity - 65.0) * 0.3,
+                "river_surge_m": (live_rain * 0.03) if live_rain > 0 else -0.8,
+                "radar_peak_dbz": 15.0 if live_rain == 0 else min(55.0, 10 * float(np.log10(max(200 * ((live_rain or 0.1) ** 1.6), 1)))),
+                "tidal_level_m": 0.2
+            }
+            pred = ml_engine.predict_ward_risk(ward, dynamic_params)
+
+            # When live rain is 0, enforce calm ground truth: 0 cm depth, Low Risk (Safe & Clear)
+            if live_rain == 0.0:
+                pred["risk_level"] = "Low"
+                pred["risk_score"] = round(min(float(pred.get("risk_score", 11.5)), 14.0), 1)
+                pred["predicted_depth_cm"] = 0.0
+                pred["depth_range_cm"] = "0 cm (Safe & Clear)"
+                pred["peak_rainfall_hr"] = "No Active Rain"
+                pred["rainfall_nowcast_6h_mm"] = 0.0
+
+            risk_score = pred["risk_score"]
+            risk_level = pred["risk_level"]
+            pred_depth = pred["predicted_depth_cm"]
+            depth_range = pred["depth_range_cm"]
+            uncertainty_margin = pred["uncertainty_margin_cm"]
+            confidence_pct = pred["confidence_pct"]
+            nowcast_6h = pred["rainfall_nowcast_6h_mm"]
+            peak_hr = pred["peak_rainfall_hr"]
+
+            hourly_series = []
+            for h in range(1, 25):
+                h_rain = hourly_rain[h - 1] if (h - 1) < len(hourly_rain) else 0.0
+                h_depth = 0.0 if h_rain < 15.0 else round((h_rain - 10.0) * 0.6, 1)
+                hourly_series.append({
+                    "hour": f"+{h}h",
+                    "time_label": f"T+{h:02d}:00",
+                    "rainfall_mm": h_rain,
+                    "inundation_depth_cm": h_depth,
+                    "river_level_m": 0.4
+                })
+
+            xai_factors = [
+                {"factor_key": "elevation_m", "label": f"Topographic Elevation ({ward['avg_elevation_m']}m MSL)", "contribution_pct": 38},
+                {"factor_key": "rain_1h_mm", "label": f"Live Weather Precipitation ({live_rain} mm/h)", "contribution_pct": 28},
+                {"factor_key": "terrain_slope_deg", "label": f"Terrain Runoff Slope ({ward['terrain_slope_deg']}°)", "contribution_pct": 20},
+                {"factor_key": "drainage_constriction_idx", "label": "Urban Stormwater Density", "contribution_pct": 14}
+            ]
+
+            pred = {
+                "ward_id": ward_id,
+                "ward_name": ward["name"],
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "predicted_depth_cm": pred_depth,
+                "depth_range_cm": depth_range,
+                "uncertainty_margin_cm": uncertainty_margin,
+                "confidence_pct": confidence_pct,
+                "rainfall_nowcast_6h_mm": nowcast_6h,
+                "peak_rainfall_hr": peak_hr,
+                "explainability_factors": xai_factors,
+                "hourly_forecast": hourly_series,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            scenario_name = f"Live High-Res Atmospheric Feed ({live_data.get('condition_description', 'Live Weather')})"
             evacuation_advice = {
                 "is_evacuation_recommended": False,
                 "primary_shelter": None,
                 "shelter_distance_approx": "N/A",
-                "advisory_notes": f"Dry weather and clear skies in {ward['name']}. Baseline topographic risk index is {pred['risk_score']}/100."
+                "advisory_notes": "Dry / normal atmospheric conditions. No waterlogging or evacuation necessary."
             }
-        else:
-            # Active Crisis Simulation (Cloudburst, Cyclone Surge, Normal Monsoon)
-            pred = ml_engine.predict_ward_risk(ward, scenario.get("params"))
-            scenario_name = scenario["name"]
-            evacuation_advice = {
-                "is_evacuation_recommended": pred["risk_level"] in ["High", "Severe"],
-                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else None,
-                "shelter_distance_approx": "580m",
-                "advisory_notes": f"Simulated Scenario: {scenario['name']} stress-testing hydrology in {ward['name']}. {'Flood inundation surge expected. Move to designated high-ground relief shelter.' if pred['risk_level'] in ['High', 'Severe'] else 'Moderate conditions active.'}"
-            }
+
+    elif sc_id == "dry_baseline":
+        # Dry Weather Baseline: Run ML prediction for this specific ward with 0 rain
+        pred = ml_engine.predict_ward_risk(ward, scenario.get("params"))
+        scenario_name = "Dry Weather / Baseline"
+        evacuation_advice = {
+            "is_evacuation_recommended": False,
+            "primary_shelter": None,
+            "shelter_distance_approx": "N/A",
+            "advisory_notes": f"Dry weather and clear skies in {ward['name']}. Baseline topographic risk index is {pred['risk_score']}/100."
+        }
     else:
-        # Monitored Mumbai catchment
+        # Active Crisis Simulation (Cloudburst, Cyclone Surge, Normal Monsoon)
         pred = ml_engine.predict_ward_risk(ward, scenario.get("params"))
         scenario_name = scenario["name"]
         evacuation_advice = {
             "is_evacuation_recommended": pred["risk_level"] in ["High", "Severe"],
-            "primary_shelter": ward.get("nearest_shelter"),
-            "shelter_distance_approx": "450 meters",
-            "advisory_notes": "Avoid flooded basements and lower elevation corridors. Use marked high-ground pedestrian walkways."
+            "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
+            "shelter_distance_approx": "580m",
+            "advisory_notes": f"Simulated Scenario: {scenario['name']} stress-testing hydrology in {ward['name']}. {'Flood inundation surge expected. Move to designated high-ground relief shelter.' if pred['risk_level'] in ['High', 'Severe'] else 'Moderate conditions active.'}"
         }
 
     return {

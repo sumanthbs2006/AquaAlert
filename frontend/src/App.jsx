@@ -5,11 +5,37 @@ import AreaDetailDrawer from './components/AreaDetailDrawer';
 import AlertsPage from './pages/AlertsPage';
 import AdminControlRoom from './pages/AdminControlRoom';
 import AboutPage from './pages/AboutPage';
+import LoginPage from './pages/LoginPage';
 import { getTranslation } from './i18n';
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const [userRole, setUserRole] = useState('citizen'); // 'citizen' or 'authority'
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aquaalert_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [currentPage, setCurrentPage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aquaalert_user');
+      return saved ? 'dashboard' : 'login';
+    } catch {
+      return 'login';
+    }
+  });
+
+  const [userRole, setUserRole] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aquaalert_user');
+      const u = saved ? JSON.parse(saved) : null;
+      return u?.role || 'citizen';
+    } catch {
+      return 'citizen';
+    }
+  });
   const [currentLang, setCurrentLang] = useState('en'); // 'en', 'hi', 'kn'
   const t = getTranslation(currentLang);
   
@@ -126,6 +152,28 @@ export default function App() {
     }
   };
 
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    if (user?.role) setUserRole(user.role);
+    setCurrentPage('dashboard');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('aquaalert_user');
+    localStorage.removeItem('aquaalert_token');
+    setCurrentUser(null);
+    setCurrentPage('login');
+  };
+
+  if (currentPage === 'login') {
+    return (
+      <LoginPage 
+        onLoginSuccess={handleLoginSuccess}
+        currentLang={currentLang}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-white">
       {/* Navigation & Header */}
@@ -140,6 +188,9 @@ export default function App() {
         onSelectScenario={handleSelectScenario}
         scenarios={scenarios}
         sensorsSummary={sensorsSummary}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenLogin={() => setCurrentPage('login')}
       />
 
       {/* Main Content Area */}

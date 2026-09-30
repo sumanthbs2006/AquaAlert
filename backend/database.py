@@ -6,6 +6,7 @@ Includes PostGIS migration DDL script for production deployments.
 """
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
@@ -700,35 +701,35 @@ ACTIVE_ALERTS = [
         "msgType": "Alert",
         "scope": "Public",
         "category": "Met",
-        "event": "Severe Convective Thunderstorm, Lightning & Urban Waterlogging Nowcast",
-        "urgency": "Expected",
-        "severity": "High",
-        "certainty": "Likely",
-        "headline": "ORANGE ALERT: Intense Thunderstorm, Lightning Strikes & Urban Waterlogging across Patna & Central Gangetic Basin",
-        "description": "Severe convective storm cells active (IMD Weather Code 96, 25.6 mm 24h rainfall, current rate 0.8 mm/h). Strong cloud-to-ground lightning discharge accompanied by short-duration intense precipitation causing surface waterlogging.",
-        "instruction": "Stay strictly indoors during lightning and gusty winds. Avoid open fields, metallic structures, and electrical transformers. Municipal drainage suction units engaged at Bailey Road and Rajendra Nagar sumps.",
-        "areaDesc": "Patna Urban Lowlands, Rajendra Nagar, Kankarbagh, and Central Gangetic Floodplains",
+        "event": "Severe Convective Downpour, Flash Inundation & Urban Submersion Advisory",
+        "urgency": "Immediate",
+        "severity": "Severe",
+        "certainty": "Observed",
+        "headline": "RED ALERT: Severe Flash Flood Inundation & Torrential Waterlogging across Patna & Central Gangetic Basin",
+        "description": "Intense convective downpour & severe drainage inundation active across Patna urban basin (IMD Weather Code 96, 38.5 mm nowcast, peak rate 14.5 mm/h). Critical street waterlogging 40–60 cm along Bailey Road sag underpasses, Kankarbagh, and Rajendra Nagar sump outfalls.",
+        "instruction": "Active RED ALERT flood advisory issued by BSDMA. Lowland residents relocate to designated relief shelters. Avoid submerged roads and underpasses. Emergency suction pumps deployed. Helpline: 1070 / 112.",
+        "areaDesc": "Patna Urban Lowlands, Rajendra Nagar, Kankarbagh, Bailey Road Basin, and Central Gangetic Floodplains",
         "affected_wards": ["ward-FN-sion-matunga", "zone-patna-central"],
         "affected_roads": ["Bailey Road Sag-Point Underpass", "Ashok Rajpath Riverfront Arterial", "Patna Junction Approach Corridor"],
-        "rainfall_time_window": "0–6 hrs: 20–35 mm localized convective bursts (Thunderstorm Code 96, 25.6 mm 24h forecast)",
-        "inundation_time_window": "1–6 hrs (Temporary street waterlogging 30–50 cm in sump basins)",
+        "rainfall_time_window": "0–6 hrs: 25–45 mm torrential convective bursts (Code 96, 38.5 mm nowcast)",
+        "inundation_time_window": "1–8 hrs (Severe urban waterlogging 40–60 cm in sump basins)",
         "is_verified_by_authority": True,
         "verified_by": "Dr. Anil K. Sinha (Disaster Management Authority Officer, BSDMA Bihar & IMD Patna)",
         "translations": {
             "en": {
-                "headline": "ORANGE ALERT: Intense Thunderstorm, Lightning Strikes & Urban Waterlogging across Patna & Central Gangetic Basin",
-                "instruction": "Stay indoors during thunderstorm activity. Avoid sheltering under trees or metal structures. Do not drive through submerged underpasses like Bailey Road sag points.",
-                "sms": "AquaAlert ORANGE: Severe thunderstorm & lightning active across Patna/Gangetic basin (25.6mm rain). Take shelter immediately. BSDMA Helpline: 1070 / 112."
+                "headline": "RED ALERT: Severe Flash Flood Inundation & Torrential Waterlogging across Patna & Central Gangetic Basin",
+                "instruction": "Active RED ALERT flood advisory issued by BSDMA. Stay indoors and avoid inundated lowlands and underpasses. Emergency shelters active.",
+                "sms": "AquaAlert RED WARNING: Severe flash flood inundation active across Patna (38.5mm rain). Move to safe high ground. BSDMA Helpline: 1070 / 112."
             },
             "hi": {
-                "headline": "ऑरेंज अलर्ट: पटना और मध्य गंगा बेसिन में तीव्र गरज-चमक, आकाशीय बिजली और जलभराव की चेतावनी",
-                "instruction": "तेज आंधी-तूफान के दौरान घरों के अंदर रहें। पेड़ों और बिजली के खंभों के नीचे शरण न लें। बेली रोड और जलमग्न अंडरपास से वाहन न निकालें।",
-                "sms": "एक्वाअलर्ट ऑरेंज: पटना और गंगा तटवर्ती इलाकों में आकाशीय बिजली व भारी बारिश का अलर्ट। खुले में न रहें। आपदा प्रबंधन हेल्पलाइन: 1070 / 112."
+                "headline": "लाल चेतावनी (रेड अलर्ट): पटना और मध्य गंगा बेसिन में तीव्र जलप्रवाह, आकाशीय बिजली और भारी जलभराव की चेतावनी",
+                "instruction": "राज्य आपदा प्रबंधन प्राधिकरण (BSDMA) द्वारा रेड अलर्ट जारी। बेली रोड और निचले इलाकों में 40-60 सेमी जलभराव। आपदा राहत केंद्र सक्रिय हैं। हेल्पलाइन: 1070 / 112.",
+                "sms": "एक्वाअलर्ट लाल चेतावनी: पटना में भीषण जलभराव व भारी बारिश। निचले इलाकों से सुरक्षित स्थानों पर जाएं। आपदा हेल्पलाइन: 1070 / 112."
             },
             "kn": {
-                "headline": "ಕಿತ್ತಳೆ ಎಚ್ಚರಿಕೆ (ಆರೆಂಜ್ ಅಲರ್ಟ್): ಪಾಟ್ನಾ ಮತ್ತು ಗಂಗಾ ಬಯಲಿನಲ್ಲಿ ತೀವ್ರ ಗುಡುಗು-ಮಿಂಚು ಹಾಗೂ ಜಲಾವೃತ ಭೀತಿ",
-                "instruction": "ಗುಡುಗು-ಮಿಂಚಿನ ಸಮಯದಲ್ಲಿ ಮನೆಯೊಳಗೇ ಇರಿ. ಮರಗಳು ಅಥವಾ ವಿದ್ಯುತ್ ಕಂಬಗಳ ಕೆಳಗೆ ನಿಲ್ಲಬೇಡಿ. ಮುಳುಗಿದ ಸಬ್‌ವೇಗಳಲ್ಲಿ ವಾಹನ ಚಾಲನೆ ಮಾಡಬೇಡಿ.",
-                "sms": "AquaAlert ಆರೆಂಜ್ ಅಲರ್ಟ್: ಪಾಟ್ನಾ ಮತ್ತು ಸುತ್ತಮುತ್ತಲಿನ ಪ್ರದೇಶಗಳಲ್ಲಿ ತೀವ್ರ ಗುಡುಗು ಮಿಂಚು ಸಹಿತ ಮಳೆ. ಜಾಗರೂಕರಾಗಿರಿ. ಸಹಾಯವಾಣಿ: 1070 / 112."
+                "headline": "ತೀವ್ರ ಕೆಂಪು ಎಚ್ಚರಿಕೆ (ರೆಡ್ ಅಲರ್ಟ್): ಪಾಟ್ನಾ ಮತ್ತು ಗಂಗಾ ಬಯಲಿನಲ್ಲಿ ಭೀಕರ ಪ್ರವಾಹ ಮತ್ತು ಜಲಾವೃತ ಭೀತಿ",
+                "instruction": "ಬಿಹಾರ ವಿಪತ್ತು ನಿರ್ವಹಣಾ ಪ್ರಾಧಿಕಾರದಿಂದ ರೆಡ್ ಅಲರ್ಟ್ ಘೋಷಿಸಲಾಗಿದೆ. ತಗ್ಗು ಪ್ರದೇಶಗಳ ನಿವಾಸಿಗಳು ಸುರಕ್ಷಿತ ಆಶ್ರಯ ತಾಣಗಳಿಗೆ ತೆರಳಲು ಸೂಚಿಸಲಾಗಿದೆ.",
+                "sms": "AquaAlert ರೆಡ್ ಅಲರ್ಟ್: ಪಾಟ್ನಾದಲ್ಲಿ ಭೀಕರ ಜಲಾವೃತ ಭೀತಿ. ತಗ್ಗು ರಸ್ತೆಗಳಿಂದ ದೂರವಿರಿ. ಸಹಾಯವಾಣಿ: 1070 / 112."
             }
         }
     },
@@ -910,6 +911,94 @@ ACTIVE_ALERTS = [
         }
     }
 ]
+
+
+def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculates great-circle distance between two coordinates in kilometers."""
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+
+def get_calamity_proximity_info(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    name: str = "",
+    ward_id: str = ""
+) -> Dict[str, Any]:
+    """
+    Evaluates geographic proximity to active calamity alerts across India.
+    Classifies location into:
+    - 'calamity_epicenter': Direct impact zone (distance <= 15km or matching locality/district keywords). Risk: SEVERE.
+    - 'calamity_near': Adjoining runoff & flood buffer (15km < distance <= 42km). Risk: MODERATE.
+    - 'calamity_peripheral': Outer cautionary perimeter (42km < distance <= 75km). Risk: LOW-MODERATE.
+    - 'none': Normal territory (> 75km away or no active calamity).
+    """
+    if not ACTIVE_ALERTS:
+        return {"zone_type": "none", "alert": None, "distance_km": 999.0}
+
+    # Only Severe / High alerts are genuine calamities (disasters)
+    calamity_alerts = [a for a in ACTIVE_ALERTS if a.get("severity") in ["Severe", "High"]]
+    if not calamity_alerts:
+        calamity_alerts = ACTIVE_ALERTS
+
+    best_alert = None
+    min_dist_km = 9999.0
+    search_str = f"{name} {ward_id}".lower()
+
+    for alert in calamity_alerts:
+        a_lat = alert.get("lat")
+        a_lon = alert.get("lon")
+
+        # Check city tokens
+        area = alert.get("areaDesc", "").lower()
+        state = alert.get("state", "").lower()
+        tokens = ["patna", "ganga", "rajendra nagar", "kankarbagh", "bailey road", 
+                  "dehradun", "rishikesh", "song river", "sahastradhara", "tapkeshwar"]
+        is_direct_token_match = any(tok in search_str for tok in tokens) and (state in search_str or any(tok in area for tok in tokens))
+
+        if lat is not None and lon is not None and a_lat is not None and a_lon is not None:
+            dist_km = haversine_distance_km(lat, lon, a_lat, a_lon)
+            if dist_km < min_dist_km:
+                min_dist_km = dist_km
+                best_alert = alert
+        elif is_direct_token_match:
+            min_dist_km = 1.0
+            best_alert = alert
+            break
+
+    if not best_alert:
+        return {"zone_type": "none", "alert": None, "distance_km": 999.0}
+
+    if min_dist_km <= 15.0:
+        return {
+            "zone_type": "calamity_epicenter",
+            "alert": best_alert,
+            "distance_km": round(min_dist_km, 1)
+        }
+    elif min_dist_km <= 42.0:
+        return {
+            "zone_type": "calamity_near",
+            "alert": best_alert,
+            "distance_km": round(min_dist_km, 1)
+        }
+    elif min_dist_km <= 75.0:
+        return {
+            "zone_type": "calamity_peripheral",
+            "alert": best_alert,
+            "distance_km": round(min_dist_km, 1)
+        }
+    else:
+        return {
+            "zone_type": "none",
+            "alert": None,
+            "distance_km": round(min_dist_km, 1)
+        }
+
 
 def get_active_alert_for_location(
     lat: Optional[float] = None,
@@ -1168,21 +1257,27 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
     r_lon = round(lon, 4)
     base_elev = estimate_base_elevation(lat, lon)
 
+    elev_base = base_elev if base_elev > 15.0 else 15.0
+    elev_1 = round(max(elev_base - 2.0, 5.0), 1)
+    elev_2 = round(max(elev_base + 3.0, 8.0), 1)
+    elev_3 = round(max(elev_base - 4.0, 4.0), 1)
+    elev_4 = round(max(elev_base + 8.0, 12.0), 1)
+
     return [
         {
             "id": f"reg-basin-{r_lat}-{r_lon}-1",
-            "name": f"{clean_name} (Central Runoff Basin)",
+            "name": f"{clean_name} (Central Urban Sector)",
             "code": "REG-01",
-            "zone": "Lowland Runoff Basin",
+            "zone": "Urban Valley Sector",
             "population": 165000,
             "area_km2": 3.6,
-            "avg_elevation_m": 4.5,
+            "avg_elevation_m": elev_1,
             "actual_altitude_m": base_elev,
-            "terrain_slope_deg": 0.8,
-            "impervious_surface_pct": 85,
-            "drainage_density_idx": 36,
-            "antecedent_moisture_pct": 82,
-            "historical_waterlogging_frequency": "Very High",
+            "terrain_slope_deg": 1.2,
+            "impervious_surface_pct": 80,
+            "drainage_density_idx": 55,
+            "antecedent_moisture_pct": 52,
+            "historical_waterlogging_frequency": "Low",
             "center": [round(lat + 0.007, 4), round(lon + 0.007, 4)],
             "polygon": [
                 [round(lat + 0.001, 4), round(lon + 0.001, 4)],
@@ -1193,8 +1288,8 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
                 [round(lat + 0.001, 4), round(lon + 0.001, 4)]
             ],
             "vulnerable_assets": [
-                {"name": f"{clean_name} Transit Underpass", "type": "transit", "lat": round(lat + 0.007, 4), "lon": round(lon + 0.006, 4), "vulnerability": "Severe"},
-                {"name": f"{clean_name} General Hospital", "type": "hospital", "lat": round(lat + 0.009, 4), "lon": round(lon + 0.008, 4), "vulnerability": "High"}
+                {"name": f"{clean_name} Transit Underpass", "type": "transit", "lat": round(lat + 0.007, 4), "lon": round(lon + 0.006, 4), "vulnerability": "Moderate"},
+                {"name": f"{clean_name} General Hospital", "type": "hospital", "lat": round(lat + 0.009, 4), "lon": round(lon + 0.008, 4), "vulnerability": "Low"}
             ],
             "nearest_shelter": {"name": f"{clean_name} Community Relief Center", "lat": round(lat + 0.011, 4), "lon": round(lon + 0.010, 4), "capacity": 650, "occupied": 20}
         },
@@ -1205,13 +1300,13 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
             "zone": "Commercial Corridor",
             "population": 145000,
             "area_km2": 2.9,
-            "avg_elevation_m": 8.0,
+            "avg_elevation_m": elev_2,
             "actual_altitude_m": base_elev,
-            "terrain_slope_deg": 1.4,
-            "impervious_surface_pct": 88,
-            "drainage_density_idx": 45,
-            "antecedent_moisture_pct": 74,
-            "historical_waterlogging_frequency": "High",
+            "terrain_slope_deg": 1.8,
+            "impervious_surface_pct": 82,
+            "drainage_density_idx": 60,
+            "antecedent_moisture_pct": 48,
+            "historical_waterlogging_frequency": "Low",
             "center": [round(lat - 0.007, 4), round(lon + 0.007, 4)],
             "polygon": [
                 [round(lat - 0.001, 4), round(lon + 0.001, 4)],
@@ -1221,24 +1316,24 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
                 [round(lat - 0.001, 4), round(lon + 0.001, 4)]
             ],
             "vulnerable_assets": [
-                {"name": f"{clean_name} Metro Station", "type": "transit", "lat": round(lat - 0.006, 4), "lon": round(lon + 0.007, 4), "vulnerability": "High"}
+                {"name": f"{clean_name} Metro Station", "type": "transit", "lat": round(lat - 0.006, 4), "lon": round(lon + 0.007, 4), "vulnerability": "Moderate"}
             ],
             "nearest_shelter": {"name": f"{clean_name} Sports Complex Relief Hub", "lat": round(lat - 0.008, 4), "lon": round(lon + 0.008, 4), "capacity": 850, "occupied": 15}
         },
         {
             "id": f"reg-basin-{r_lat}-{r_lon}-3",
-            "name": f"{clean_name} (Drainage Canal & Lowland Sump)",
+            "name": f"{clean_name} (Drainage Canal & Lowland Sector)",
             "code": "REG-03",
             "zone": "Canal Outfall Basin",
             "population": 180000,
             "area_km2": 4.2,
-            "avg_elevation_m": 2.5,
+            "avg_elevation_m": elev_3,
             "actual_altitude_m": base_elev,
-            "terrain_slope_deg": 0.4,
-            "impervious_surface_pct": 82,
-            "drainage_density_idx": 28,
-            "antecedent_moisture_pct": 88,
-            "historical_waterlogging_frequency": "Severe",
+            "terrain_slope_deg": 0.8,
+            "impervious_surface_pct": 78,
+            "drainage_density_idx": 45,
+            "antecedent_moisture_pct": 58,
+            "historical_waterlogging_frequency": "Moderate",
             "center": [round(lat - 0.007, 4), round(lon - 0.007, 4)],
             "polygon": [
                 [round(lat - 0.001, 4), round(lon - 0.001, 4)],
@@ -1248,7 +1343,7 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
                 [round(lat - 0.001, 4), round(lon - 0.001, 4)]
             ],
             "vulnerable_assets": [
-                {"name": f"{clean_name} Lowland Settlement", "type": "settlement", "lat": round(lat - 0.007, 4), "lon": round(lon - 0.008, 4), "vulnerability": "Severe"}
+                {"name": f"{clean_name} Lowland Settlement", "type": "settlement", "lat": round(lat - 0.007, 4), "lon": round(lon - 0.008, 4), "vulnerability": "Moderate"}
             ],
             "nearest_shelter": {"name": f"{clean_name} Secondary School Pavilion", "lat": round(lat - 0.005, 4), "lon": round(lon - 0.006, 4), "capacity": 500, "occupied": 25}
         },
@@ -1259,12 +1354,12 @@ def generate_regional_wards(lat: float, lon: float, name: str = "Searched Locati
             "zone": "Elevated Plateau",
             "population": 115000,
             "area_km2": 3.3,
-            "avg_elevation_m": 18.0,
+            "avg_elevation_m": elev_4,
             "actual_altitude_m": base_elev,
             "terrain_slope_deg": 3.8,
             "impervious_surface_pct": 62,
             "drainage_density_idx": 68,
-            "antecedent_moisture_pct": 55,
+            "antecedent_moisture_pct": 42,
             "historical_waterlogging_frequency": "Low",
             "center": [round(lat + 0.007, 4), round(lon - 0.007, 4)],
             "polygon": [

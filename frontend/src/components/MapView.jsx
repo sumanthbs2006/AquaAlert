@@ -771,7 +771,11 @@ export default function MapView({
 
     // 2. Identify active target ward for evacuation pathway
     const isCrisis = activeScenario?.id === 'cloudburst' || activeScenario?.id === 'cyclone_surge';
-    const targetWardId = selectedWardId || (isCrisis ? (riskZones?.features?.[0]?.properties?.ward_id) : null);
+    const activeFeat = selectedWardId ? riskZones?.features?.find(f => f.properties?.ward_id === selectedWardId) : null;
+    const wardProps = activeFeat?.properties || {};
+    const isHazardZone = wardProps.risk_level === 'Severe' || wardProps.risk_level === 'High' || isCrisis;
+    const shouldShowRoute = layerVisibility.evacuationCorridors || isHazardZone || navActive;
+    const targetWardId = shouldShowRoute ? (selectedWardId || (isCrisis ? (riskZones?.features?.[0]?.properties?.ward_id) : null)) : null;
 
     if (targetWardId) {
       fetch(`/api/carto/evacuation-route/${targetWardId}`)
@@ -894,8 +898,7 @@ export default function MapView({
                 </div>
               </div>
             `)
-            .addTo(evacGroup)
-            .openPopup();
+            .addTo(evacGroup);
         })
         .catch(console.error);
     } else {
@@ -1838,38 +1841,7 @@ export default function MapView({
               </button>
             </div>
           </div>
-        ) : (
-          /* Safe Corridor Preview Card (When route is visible but navigation not started) */
-          <div className="absolute top-28 sm:top-20 left-2 right-2 sm:right-auto sm:left-4 z-20 bg-emerald-950/95 backdrop-blur-md border border-emerald-500/70 p-3 rounded-xl shadow-2xl text-xs max-w-none sm:max-w-sm flex flex-col gap-2 animate-in fade-in">
-            <div className="flex items-start gap-2">
-              <Navigation className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5 animate-pulse" />
-              <div className="space-y-0.5 min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <strong className="text-emerald-300 text-xs font-bold">{t.safeCorridorActive}</strong>
-                  <span className="text-[9px] bg-emerald-800 text-white px-1 rounded font-mono">
-                    ~{activeEvacuationInfo.est_evacuation_time_mins} {t.walkTime}
-                  </span>
-                </div>
-                <p className="text-[11px] text-emerald-200 leading-snug truncate">
-                  {activeEvacuationInfo.distance_m}m to {activeEvacuationInfo.destination_shelter.name}
-                </p>
-                <span className="text-[10px] text-cyan-300 font-mono block">
-                  {t.elevationGain}: +{activeEvacuationInfo.elevation_gain_m}m above flood level
-                </span>
-              </div>
-            </div>
-
-            {/* Start Live GPS Navigation Button */}
-            <button
-              type="button"
-              onClick={startNavigation}
-              className="w-full py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/60 transition-all cursor-pointer border border-teal-400/30"
-            >
-              <Navigation className="w-3.5 h-3.5 text-cyan-200 animate-pulse" />
-              <span>{t.startGpsNav || '🧭 Start Turn-by-Turn GPS Navigation'}</span>
-            </button>
-          </div>
-        )
+        ) : null
       )}
 
       {/* Floating Bottom-Left GIS Map Legend & Radar Controls (Responsive Collapsible on Mobile) */}
