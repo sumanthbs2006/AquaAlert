@@ -8,9 +8,10 @@ Provides:
 5. Model Confidence & Uncertainty Bounds (e.g. 91% confidence, ±12 cm interval)
 """
 
+from __future__ import annotations
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime, timezone

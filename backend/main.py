@@ -4,6 +4,16 @@ Smart India Hackathon 2026 (Problem Statement SIH26071)
 Theme: Disaster Management / Climate Resilience
 """
 
+import os
+import sys
+
+# Ensure repository root and backend directory are in sys.path regardless of execution environment
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
+for _p in [_parent_dir, _current_dir]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
