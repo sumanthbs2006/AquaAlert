@@ -174,7 +174,7 @@ def override_alert(req: AlertOverrideRequest):
     Human-in-the-loop verification or manual override of an AI-generated alert.
     Allows elevating, downgrading, or silencing false positives.
     """
-    alert = next((a for a in ACTIVE_ALERTS if a["id"] == req.alert_id), None)
+    alert = next((a for a in ACTIVE_ALERTS if a["id"] == req.alert_id or a.get("alias_id") == req.alert_id), None)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
@@ -210,7 +210,7 @@ def trigger_emergency_broadcast(req: EmergencyBroadcastRequest):
     """
     Simulates sending emergency Cell Broadcast alarm / SMS blast to citizens in designated wards.
     """
-    alert = next((a for a in ACTIVE_ALERTS if a["id"] == req.alert_id), None)
+    alert = next((a for a in ACTIVE_ALERTS if a["id"] == req.alert_id or a.get("alias_id") == req.alert_id), None)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 

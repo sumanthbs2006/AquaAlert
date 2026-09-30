@@ -6,11 +6,13 @@ and official standard CAP v1.2 XML / JSON export for emergency response agencies
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import xml.etree.ElementTree as ET
 from backend.database import ACTIVE_ALERTS, WARDS_DATA
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts & CAP Protocols"])
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 @router.get("")
 def get_active_alerts(
@@ -19,10 +21,12 @@ def get_active_alerts(
     ward_id: Optional[str] = None
 ):
     """
-    Returns active heavy rainfall and flood inundation warnings
+    Returns active heavy rainfall and flood inundation warnings across India
     with localized multilingual headlines, instructions, and mock SMS previews.
     """
     results = []
+    now_ist = datetime.now(IST)
+
     for alert in ACTIVE_ALERTS:
         # Filter by severity if specified
         if severity and alert["severity"].lower() != severity.lower():
@@ -35,16 +39,32 @@ def get_active_alerts(
         # Extract language translation if available
         translation = alert.get("translations", {}).get(lang, alert.get("translations", {}).get("en", {}))
         
+        # Format sent timestamp cleanly
+        sent_raw = alert.get("sent", now_ist.isoformat())
+        try:
+            dt = datetime.fromisoformat(sent_raw)
+            # Ensure it shows current day's issuance
+            dt_display = dt.replace(year=now_ist.year, month=now_ist.month, day=now_ist.day)
+            formatted_sent = dt_display.strftime("%b %d, %Y | %I:%M %p IST")
+        except Exception:
+            formatted_sent = now_ist.strftime("%b %d, %Y | %I:%M %p IST")
+
         item = {
             "id": alert["id"],
+            "alias_id": alert.get("alias_id"),
             "identifier": alert["identifier"],
             "sender": alert["sender"],
-            "sent": alert["sent"],
+            "sent": formatted_sent,
+            "raw_sent": sent_raw,
+            "state": alert.get("state", "India"),
+            "lat": alert.get("lat"),
+            "lon": alert.get("lon"),
             "urgency": alert["urgency"],
             "severity": alert["severity"],
             "certainty": alert["certainty"],
             "event": alert["event"],
             "headline": translation.get("headline", alert["headline"]),
+            "description": alert.get("description", ""),
             "instruction": translation.get("instruction", alert["instruction"]),
             "sms_preview": translation.get("sms", alert.get("translations", {}).get("en", {}).get("sms", "")),
             "area_desc": alert["areaDesc"],
@@ -69,7 +89,7 @@ def get_active_alerts(
 @router.get("/{alert_id}")
 def get_alert_detail(alert_id: str):
     """Returns single alert detail including full multilingual translations."""
-    alert = next((a for a in ACTIVE_ALERTS if a["id"] == alert_id or a["identifier"] == alert_id), None)
+    alert = next((a for a in ACTIVE_ALERTS if a["id"] == alert_id or a.get("alias_id") == alert_id or a["identifier"] == alert_id), None)
     if not alert:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
     return alert

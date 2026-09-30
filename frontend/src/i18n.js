@@ -31,7 +31,7 @@ export const translations = {
     scenarioBaseline: "Dry Weather / Safe Baseline",
 
     // Map Controls & HUD
-    searchPlaceholder: "Search Mappls / Ward (Kurla, Dharavi)...",
+    searchPlaceholder: "Search city, PIN code, or river basin in India...",
     gpsLocate: "GPS",
     locating: "Locating...",
     horizonRain: "0–6h Rain",
@@ -66,6 +66,7 @@ export const translations = {
     layerAwsStations: "AWS Stations",
     layerRoadsSubways: "Roads & Subways",
     layerEvacRoutes: "Evacuation Routes",
+    layerActiveAlerts: "Live CAP Alerts",
 
     // Area Detail Drawer
     runningInference: "Running Hydrological ML Inference...",
@@ -92,6 +93,16 @@ export const translations = {
     pedestrianGuidance: "Pedestrian Guidance",
     closeDrawer: "Close Drawer",
     callControlRoom: "Dial Disaster Control Room (1916 / 112)",
+    startGpsNav: "Start Turn-by-Turn GPS Navigation",
+    gpsNavActive: "Live GPS Tracking Active",
+    gpsGuidanceTitle: "Turn-by-Turn Safe Evacuation Corridor",
+    simulateWalk: "Simulate Movement",
+    pauseWalk: "Pause Movement",
+    recenterGps: "Recenter on Me",
+    openGoogleMaps: "Google Maps",
+    exitNav: "Exit Navigation",
+    safeElevationMsg: "Safe High Ground (+4.2m above flood level)",
+    destinationReached: "Safely Arrived at Relief Shelter!",
 
     // Alerts Page
     alertsTitle: "Active Hyperlocal Flood & Rainfall Warnings",
@@ -101,6 +112,7 @@ export const translations = {
     filterHigh: "HIGH",
     filterModerate: "MODERATE",
     viewCapXml: "Download CAP v1.2 XML",
+    viewInGisDashboard: "View on GIS Map →",
     testBroadcastModal: "Preview Mock Broadcast (SMS / WhatsApp / Siren)",
     affectedRoads: "Vulnerable Corridors / Roads",
     vulnerableInfra: "Critical Assets in Hazard Zone",
@@ -188,7 +200,7 @@ export const translations = {
     scenarioBaseline: "शुष्क मौसम / सुरक्षित स्थिति",
 
     // Map Controls & HUD
-    searchPlaceholder: "मैपल्स / वार्ड खोजें (कुर्ला, धारावी)...",
+    searchPlaceholder: "भारत में कोई शहर, पिन कोड या नदी बेसिन खोजें...",
     gpsLocate: "जीपीएस",
     locating: "खोज जारी...",
     horizonRain: "0–6 घंटे बारिश",
@@ -223,6 +235,7 @@ export const translations = {
     layerAwsStations: "मौसम केंद्र",
     layerRoadsSubways: "सड़कें व सबवे",
     layerEvacRoutes: "निकासी गलियारे",
+    layerActiveAlerts: "सक्रिय आपदा चेतावनियाँ",
 
     // Area Detail Drawer
     runningInference: "एआई जल विज्ञान पूर्वानुमान गणना जारी...",
@@ -258,6 +271,7 @@ export const translations = {
     filterHigh: "उच्च",
     filterModerate: "मध्यम",
     viewCapXml: "CAP v1.2 XML देखें",
+    viewInGisDashboard: "GIS मानचित्र पर देखें →",
     testBroadcastModal: "स्मार्टफोन अलर्ट सिम्युलेटर (SMS / WhatsApp / सायरन)",
     affectedRoads: "प्रभावित सड़कें व सबवे",
     vulnerableInfra: "जोखिम वाले स्थल व अस्पताल",
@@ -345,7 +359,7 @@ export const translations = {
     scenarioBaseline: "ಒಣ ಹವೆ / ಸುರಕ್ಷಿತ ಪರಿಸ್ಥಿತಿ",
 
     // Map Controls & HUD
-    searchPlaceholder: "ಮ್ಯಾಪ್ಲ್ಸ್ / ವಾರ್ಡ್ ಹುಡುಕಿ (ಕುರ್ಲಾ, ಧಾರಾವಿ)...",
+    searchPlaceholder: "ಭಾರತದ ಯಾವುದೇ ನಗರ, ಪಿನ್ ಕೋಡ್ ಅಥವಾ ನದಿ ಕಣಿವೆ ಹುಡುಕಿ...",
     gpsLocate: "ಜಿಪಿಎಸ್",
     locating: "ಹುಡುಕಲಾಗುತ್ತಿದೆ...",
     horizonRain: "0–6 ಗಂಟೆ ಮಳೆ",
@@ -380,6 +394,7 @@ export const translations = {
     layerAwsStations: "ಸ್ವಯಂಚಾಲಿತ ಹವಾಮಾನ ಕೇಂದ್ರಗಳು",
     layerRoadsSubways: "ರಸ್ತೆಗಳು ಮತ್ತು ಸಬ್‌ವೇಗಳು",
     layerEvacRoutes: "ಸ್ಥಳಾಂತರ ಮಾರ್ಗಗಳು",
+    layerActiveAlerts: "ಸಕ್ರಿಯ ಪ್ರವಾಹ ಎಚ್ಚರಿಕೆಗಳು",
 
     // Area Detail Drawer
     runningInference: "ಜಲವಿಜ್ಞಾನ ML ಮುನ್ಸೂಚನೆ ಪ್ರಕ್ರಿಯೆ ಚಾಲನೆಯಲ್ಲಿದೆ...",
@@ -415,6 +430,7 @@ export const translations = {
     filterHigh: "ಹೆಚ್ಚಿನ ಎಚ್ಚರಿಕೆ",
     filterModerate: "ಮಧ್ಯಮ ಎಚ್ಚರಿಕೆ",
     viewCapXml: "CAP v1.2 XML ವೀಕ್ಷಿಸಿ",
+    viewInGisDashboard: "GIS ನಕ್ಷೆಯಲ್ಲಿ ವೀಕ್ಷಿಸಿ →",
     testBroadcastModal: "ಮೊಬೈಲ್ ಎಚ್ಚರಿಕೆ ಸಿಮ್ಯುಲೇಟರ್ (SMS / WhatsApp / ಸೈರನ್)",
     affectedRoads: "ಬಾಧಿತ ರಸ್ತೆಗಳು ಮತ್ತು ಸಬ್‌ವೇಗಳು",
     vulnerableInfra: "ಅಪಾಯದಲ್ಲಿರುವ ಆಸ್ಪತ್ರೆಗಳು ಮತ್ತು ಸಂಸ್ಥೆಗಳು",

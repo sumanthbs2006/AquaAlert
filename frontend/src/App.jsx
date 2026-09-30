@@ -19,6 +19,7 @@ export default function App() {
   const [sensors, setSensors] = useState(null);
   const [sensorsSummary, setSensorsSummary] = useState(null);
   const [selectedWardId, setSelectedWardId] = useState(null);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [currentRegion, setCurrentRegion] = useState({
     lat: 19.076,
     lon: 72.877,
@@ -83,6 +84,21 @@ export default function App() {
     }
   };
 
+  // Navigate directly from Alert Card to GIS Dashboard at Alert Coordinates
+  const handleNavigateToAlertLocation = (alert) => {
+    setCurrentPage('dashboard');
+    if (alert?.lat && alert?.lon) {
+      const targetName = alert.area_desc || `${alert.state} Alert Zone`;
+      handleLocationChange({
+        lat: alert.lat,
+        lon: alert.lon,
+        name: targetName
+      });
+      const alertWardId = `loc_${alert.lat}_${alert.lon}_${encodeURIComponent(targetName)}`;
+      setSelectedWardId(alertWardId);
+    }
+  };
+
   // Scenario Selection Handler
   const handleSelectScenario = async (scenarioId) => {
     try {
@@ -139,14 +155,21 @@ export default function App() {
               currentRegion={currentRegion}
               onLocationChange={handleLocationChange}
               currentLang={currentLang}
+              isNavigating={isNavigating}
+              setIsNavigating={setIsNavigating}
             />
             {selectedWardId && (
               <AreaDetailDrawer
                 wardId={selectedWardId}
-                onClose={() => setSelectedWardId(null)}
+                onClose={() => {
+                  setSelectedWardId(null);
+                  setIsNavigating(false);
+                }}
                 activeScenario={activeScenario}
                 activeScenarioName={getScenarioName(activeScenario)}
                 currentLang={currentLang}
+                isNavigating={isNavigating}
+                onStartNavigation={() => setIsNavigating(true)}
               />
             )}
           </div>
@@ -156,6 +179,7 @@ export default function App() {
           <AlertsPage
             currentLang={currentLang}
             setCurrentLang={setCurrentLang}
+            onNavigateToLocation={handleNavigateToAlertLocation}
           />
         )}
 

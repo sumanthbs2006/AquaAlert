@@ -19,30 +19,60 @@ import {
   Moon,
   Compass,
   Map as MapIcon,
-  Sparkles
+  Sparkles,
+  CornerUpRight,
+  CornerUpLeft,
+  ArrowUp,
+  CheckCircle2,
+  ExternalLink,
+  X
 } from 'lucide-react';
 import { getTranslation } from '../i18n';
+import { 
+  INDIA_BOUNDS, 
+  INDIA_PAN_LIMITS, 
+  INDIA_OUTLINE,
+  isPointInIndia
+} from '../data/indiaBoundary';
+
+const INDIAN_BASINS = [
+  { name: 'India National Overview', label: '🇮🇳 India', lat: 22.5, lon: 80.0, zoom: 5 },
+  { name: 'Mumbai Metropolitan Basin', label: '🌊 Mumbai', lat: 19.076, lon: 72.877, zoom: 13 },
+  { name: 'Uttarakhand Foothills Basin', label: '⛰️ Uttarakhand', lat: 30.12, lon: 78.30, zoom: 12 },
+  { name: 'Patna Gangetic Basin', label: '⚡ Bihar / Patna', lat: 25.61, lon: 85.14, zoom: 13 },
+  { name: 'Kolkata Delta Basin', label: '🌀 Kolkata', lat: 22.57, lon: 88.36, zoom: 13 },
+  { name: 'Bengaluru Urban Basin', label: '🏙️ Bengaluru', lat: 12.97, lon: 77.59, zoom: 13 },
+  { name: 'Mahanadi Delta Basin', label: '🌊 Odisha', lat: 20.30, lon: 85.82, zoom: 13 },
+  { name: 'Yamuna River Basin', label: '🏛️ Delhi NCR', lat: 28.66, lon: 77.24, zoom: 13 }
+];
 
 const CARTO_KEY = import.meta.env.VITE_CARTO_API_KEY || '';
+const cartoParam = CARTO_KEY ? `?key=${CARTO_KEY}` : '';
 
 const BASEMAP_TILES = {
   dark_matter: {
     name: 'CARTO Dark Matter',
-    url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+    url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${cartoParam}`,
     subdomains: 'abcd',
     attribution: '&copy; CARTO &copy; OpenStreetMap'
   },
   voyager: {
     name: 'CARTO Voyager (Streets & Water)',
-    url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+    url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${cartoParam}`,
     subdomains: 'abcd',
     attribution: '&copy; CARTO &copy; OpenStreetMap'
   },
   positron: {
     name: 'CARTO Positron (High-Contrast)',
-    url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+    url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${cartoParam}`,
     subdomains: 'abcd',
     attribution: '&copy; CARTO &copy; OpenStreetMap'
+  },
+  osm: {
+    name: 'OpenStreetMap (Standard)',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: 'abc',
+    attribution: '&copy; OpenStreetMap contributors'
   },
   satellite: {
     name: 'Satellite Hybrid Terrain',
@@ -60,7 +90,9 @@ export default function MapView({
   activeScenario,
   currentRegion,
   onLocationChange,
-  currentLang = 'en'
+  currentLang = 'en',
+  isNavigating = false,
+  setIsNavigating = () => {}
 }) {
   const t = getTranslation(currentLang);
   const mapContainerRef = useRef(null);
@@ -69,6 +101,9 @@ export default function MapView({
   const lastSearchPinRef = useRef(null);
   const layersRef = useRef({
     tileLayer: null,
+    mask: null,
+    outline: null,
+    alerts: null,
     polygons: null,
     radar: null,
     radarSweep: null,
@@ -76,6 +111,11 @@ export default function MapView({
     aws: null,
     assets: null,
     evacuation: null,
+    beadMarkers: [],
+    gpsTrackerLayer: null,
+    gpsPuckMarker: null,
+    gpsAccuracyCircle: null,
+    traveledPolyline: null,
     userGps: null
   });
 
@@ -90,6 +130,9 @@ export default function MapView({
   const [isSearching, setIsSearching] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
 
+  // Active CAP Alerts State
+  const [activeAlerts, setActiveAlerts] = useState([]);
+
   // Layers Visibility
   const [layerVisibility, setLayerVisibility] = useState({
     floodZones: true,
@@ -97,7 +140,8 @@ export default function MapView({
     riverGauges: true,
     awsStations: true,
     vulnerableAssets: true,
-    evacuationCorridors: true
+    evacuationCorridors: true,
+    activeAlerts: true
   });
   const [showLayerMenu, setShowLayerMenu] = useState(false);
 
@@ -114,14 +158,208 @@ export default function MapView({
   const [liveMet, setLiveMet] = useState(null);
   const [activeEvacuationInfo, setActiveEvacuationInfo] = useState(null);
 
-  // 1. Initialize Leaflet Map with CARTO Basemap
+  // Live GPS Evacuation Navigation State
+  const [navActive, setNavActive] = useState(false);
+  const [isSimulatingGps, setIsSimulatingGps] = useState(false);
+  const [currentNavIndex, setCurrentNavIndex] = useState(0);
+  const [userGpsCoords, setUserGpsCoords] = useState(null);
+  const [gpsHeading, setGpsHeading] = useState(0);
+  const [hasArrived, setHasArrived] = useState(false);
+  const [autoPanGps, setAutoPanGps] = useState(true);
+
+  const gpsWatchRef = useRef(null);
+  const simTimerRef = useRef(null);
+
+  // Calculate bearing in degrees between two coordinates
+  const calculateBearing = (lat1, lon1, lat2, lon2) => {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const toDeg = (r) => (r * 180) / Math.PI;
+    const dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  };
+
+  const startNavigation = () => {
+    setNavActive(true);
+    setIsNavigating(true);
+    setCurrentNavIndex(0);
+    setHasArrived(false);
+    setIsSimulatingGps(false);
+    if (activeEvacuationInfo?.waypoints?.length) {
+      const startPos = activeEvacuationInfo.waypoints[0];
+      setUserGpsCoords(startPos);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.flyTo(startPos, 16, { duration: 0.8 });
+      }
+    }
+  };
+
+  const stopNavigation = () => {
+    setNavActive(false);
+    setIsNavigating(false);
+    setIsSimulatingGps(false);
+    setHasArrived(false);
+    if (simTimerRef.current) clearInterval(simTimerRef.current);
+    if (gpsWatchRef.current && navigator.geolocation) {
+      navigator.geolocation.clearWatch(gpsWatchRef.current);
+    }
+  };
+
+  const toggleSimulation = () => {
+    if (hasArrived) {
+      setCurrentNavIndex(0);
+      setHasArrived(false);
+      setIsSimulatingGps(true);
+      return;
+    }
+    setIsSimulatingGps(prev => !prev);
+  };
+
+  const recenterMapOnGps = () => {
+    const pos = userGpsCoords || activeEvacuationInfo?.waypoints?.[currentNavIndex];
+    if (mapInstanceRef.current && pos) {
+      mapInstanceRef.current.flyTo(pos, 17, { duration: 0.6 });
+    }
+  };
+
+  // Sync external prop isNavigating
+  useEffect(() => {
+    if (isNavigating && !navActive) {
+      startNavigation();
+    } else if (!isNavigating && navActive) {
+      stopNavigation();
+    }
+  }, [isNavigating]);
+
+  // Global trigger for popup button
+  useEffect(() => {
+    window.__startEvacNav = () => {
+      startNavigation();
+    };
+    return () => {
+      delete window.__startEvacNav;
+    };
+  }, [activeEvacuationInfo]);
+
+  // Simulation & WatchPosition Runner
+  useEffect(() => {
+    if (!navActive || !activeEvacuationInfo?.waypoints?.length) {
+      if (simTimerRef.current) clearInterval(simTimerRef.current);
+      if (gpsWatchRef.current && navigator.geolocation) {
+        navigator.geolocation.clearWatch(gpsWatchRef.current);
+      }
+      return;
+    }
+
+    const waypoints = activeEvacuationInfo.waypoints;
+
+    if (isSimulatingGps) {
+      if (gpsWatchRef.current && navigator.geolocation) {
+        navigator.geolocation.clearWatch(gpsWatchRef.current);
+      }
+
+      simTimerRef.current = setInterval(() => {
+        setCurrentNavIndex((prev) => {
+          const next = prev + 1;
+          if (next >= waypoints.length) {
+            clearInterval(simTimerRef.current);
+            setIsSimulatingGps(false);
+            setHasArrived(true);
+            return waypoints.length - 1;
+          }
+          const pos = waypoints[next];
+          const nextPos = waypoints[Math.min(next + 1, waypoints.length - 1)];
+          const bearing = calculateBearing(pos[0], pos[1], nextPos[0], nextPos[1]);
+          setUserGpsCoords(pos);
+          setGpsHeading(bearing);
+          if (autoPanGps && mapInstanceRef.current) {
+            mapInstanceRef.current.panTo(pos, { animate: true, duration: 0.35 });
+          }
+          return next;
+        });
+      }, 400);
+
+      return () => {
+        if (simTimerRef.current) clearInterval(simTimerRef.current);
+      };
+    } else {
+      if (navigator.geolocation) {
+        gpsWatchRef.current = navigator.geolocation.watchPosition(
+          (pos) => {
+            const userPt = [pos.coords.latitude, pos.coords.longitude];
+            setUserGpsCoords(userPt);
+            if (pos.coords.heading) setGpsHeading(pos.coords.heading);
+            if (autoPanGps && mapInstanceRef.current) {
+              mapInstanceRef.current.panTo(userPt, { animate: true, duration: 0.5 });
+            }
+          },
+          (err) => console.log('Geolocation watch fallback to route start:', err),
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+        );
+      }
+      return () => {
+        if (gpsWatchRef.current && navigator.geolocation) {
+          navigator.geolocation.clearWatch(gpsWatchRef.current);
+        }
+      };
+    }
+  }, [navActive, isSimulatingGps, activeEvacuationInfo, autoPanGps]);
+
+  // Derive current step and remaining distance/time
+  const getNavProgress = () => {
+    if (!activeEvacuationInfo || !activeEvacuationInfo.waypoints?.length) {
+      return { instruction: 'Proceed to shelter', remainingDist: 0, remainingMins: 0, maneuver: 'straight' };
+    }
+    const totalPts = activeEvacuationInfo.waypoints.length;
+    const fractionLeft = Math.max(0, (totalPts - currentNavIndex) / totalPts);
+    const remainingDist = Math.round(activeEvacuationInfo.distance_m * fractionLeft);
+    const remainingMins = Math.max(1, Math.round(activeEvacuationInfo.est_evacuation_time_mins * fractionLeft));
+
+    if (hasArrived) {
+      return {
+        instruction: t.destinationReached || 'Arrived Safely at Designated Relief Shelter!',
+        remainingDist: 0,
+        remainingMins: 0,
+        maneuver: 'arrived'
+      };
+    }
+
+    const steps = activeEvacuationInfo.steps || [];
+    let curStep = steps[0];
+    if (steps.length > 0) {
+      const stepIdx = Math.min(
+        Math.floor((currentNavIndex / totalPts) * steps.length),
+        steps.length - 1
+      );
+      curStep = steps[stepIdx];
+    }
+
+    const instruction = curStep?.instruction || 'Follow highlighted safe road corridor';
+    const lowerInst = instruction.toLowerCase();
+    let maneuver = 'straight';
+    if (lowerInst.includes('right')) maneuver = 'right';
+    else if (lowerInst.includes('left')) maneuver = 'left';
+    else if (lowerInst.includes('arrive') || lowerInst.includes('shelter')) maneuver = 'arrived';
+
+    return { instruction, remainingDist, remainingMins, maneuver };
+  };
+
+  // 1. Initialize Leaflet Map with CARTO Basemap & India Pan/Zoom Constraints
   useEffect(() => {
     if (!mapContainerRef.current) return;
     if (mapInstanceRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: [19.065, 72.875],
-      zoom: 13,
+      center: [22.0, 80.0],
+      zoom: 5,
+      minZoom: 4,
+      zoomSnap: 0.25,
+      maxBounds: [
+        [-2.0, 55.0],
+        [40.0, 108.0]
+      ],
+      maxBoundsViscosity: 0.75,
       zoomControl: false,
       attributionControl: false
     });
@@ -135,13 +373,49 @@ export default function MapView({
 
     layersRef.current.tileLayer = initialTileLayer;
 
+    // Demarcate Indian sovereign boundary with a high-tech cyan outline
+    const outlineLayer = L.geoJSON(INDIA_OUTLINE, {
+      style: {
+        color: '#0284c7',
+        weight: 2,
+        opacity: 0.95,
+        fillColor: 'transparent',
+        fillOpacity: 0
+      },
+      interactive: false
+    }).addTo(map);
+
+    layersRef.current.outline = outlineLayer;
+
     // Zoom controls bottom-right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Allow clicking anywhere on the map to inspect hyperlocal flood risk & hydrograph
+    // Initial map position: if navigated to a regional alert, center there; otherwise show India overview
+    if (currentRegion?.lat && currentRegion?.lon && currentRegion.isRegional) {
+      map.setView([currentRegion.lat, currentRegion.lon], currentRegion.zoom || 13);
+    } else {
+      map.fitBounds([
+        [6.5, 68.0],
+        [36.5, 97.5]
+      ], { padding: [30, 30], maxZoom: 6 });
+    }
+
+    // Strictly restrict click inspection and telemetry features to Indian sovereign territory
     map.on('click', (e) => {
       const lat = parseFloat(e.latlng.lat.toFixed(4));
       const lon = parseFloat(e.latlng.lng.toFixed(4));
+      if (!isPointInIndia(lat, lon)) {
+        L.popup({ offset: [0, -6] })
+          .setLatLng([lat, lon])
+          .setContent(`
+            <div style="font-size: 11px; padding: 4px 8px; font-family: inherit; line-height: 1.4;">
+              <span style="color: #38bdf8; font-weight: 700; display: block; margin-bottom: 2px;">🇮🇳 AquaAlert India</span>
+              <span style="color: #cbd5e1;">Sensors, alerts &amp; flood telemetry are active within Indian sovereign territory.</span>
+            </div>
+          `)
+          .openOn(map);
+        return;
+      }
       const locId = `loc_${lat}_${lon}_Inspection Point (${lat}, ${lon})`;
       onSelectWard(locId);
     });
@@ -164,12 +438,31 @@ export default function MapView({
       .catch(console.error);
   }, [currentRegion]);
 
+  // Smoothly fly to target region when currentRegion coordinates change
+  const prevRegionRef = useRef(null);
+  useEffect(() => {
+    if (!mapInstanceRef.current || !currentRegion?.lat || !currentRegion?.lon) return;
+    if (!prevRegionRef.current) {
+      prevRegionRef.current = currentRegion;
+      if (currentRegion.isRegional) {
+        mapInstanceRef.current.flyTo([currentRegion.lat, currentRegion.lon], currentRegion.zoom || 13, { duration: 1.2 });
+      }
+      return;
+    }
+    if (prevRegionRef.current.lat !== currentRegion.lat || prevRegionRef.current.lon !== currentRegion.lon) {
+      prevRegionRef.current = currentRegion;
+      mapInstanceRef.current.flyTo([currentRegion.lat, currentRegion.lon], currentRegion.zoom || 13, { duration: 1.2 });
+    }
+  }, [currentRegion]);
+
   // 2. Basemap Switcher Effect
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
     const baseConfig = BASEMAP_TILES[selectedBasemap];
+    if (!baseConfig) return;
+
     if (layersRef.current.tileLayer) {
       map.removeLayer(layersRef.current.tileLayer);
     }
@@ -182,8 +475,9 @@ export default function MapView({
 
     layersRef.current.tileLayer = newTileLayer;
 
-    // Ensure GeoJSON & other overlays stay on top of the new tile layer
-    if (layersRef.current.polygons) layersRef.current.polygons.bringToFront();
+    if (typeof newTileLayer.bringToBack === 'function') {
+      newTileLayer.bringToBack();
+    }
   }, [selectedBasemap]);
 
   // 3. Render & Update GeoJSON Flood Risk Choropleth Wards (With Dynamic Surge Delta)
@@ -487,14 +781,65 @@ export default function MapView({
           const route = data.route;
           setActiveEvacuationInfo(route);
 
-          // Pulsing Glowing Green Safe Corridor Polyline
+          // 1. Constant Dual-Layer Road-Level Polyline (Navy outline casing + vibrant solid blue core)
+          // Solid and non-blinking at all times
           L.polyline(route.waypoints, {
-            color: '#10b981',
-            weight: 5,
-            opacity: 0.9,
-            dashArray: '8, 10',
-            className: 'evac-pulsing-path'
+            color: '#1e3a8a',
+            weight: 9,
+            opacity: 0.95,
+            lineJoin: 'round',
+            lineCap: 'round',
+            className: 'evac-solid-corridor'
           }).addTo(evacGroup);
+
+          L.polyline(route.waypoints, {
+            color: '#2563eb',
+            weight: 5,
+            opacity: 1.0,
+            lineJoin: 'round',
+            lineCap: 'round'
+          }).addTo(evacGroup);
+
+          // Subtle solid top glow line (100% constant, NO blinking dash)
+          L.polyline(route.waypoints, {
+            color: '#93c5fd',
+            weight: 1.5,
+            opacity: 0.6,
+            lineJoin: 'round',
+            lineCap: 'round'
+          }).addTo(evacGroup);
+
+          // 2. Road Waypoint Bead Dots (matching Image 2 GPS track nodes)
+          const totalPts = route.waypoints.length;
+          const beadStep = Math.max(1, Math.floor(totalPts / 22));
+          const sampledBeads = [];
+          for (let i = 0; i < totalPts; i += beadStep) {
+            sampledBeads.push({ coord: route.waypoints[i], idx: i });
+          }
+          if (sampledBeads[sampledBeads.length - 1].idx !== totalPts - 1) {
+            sampledBeads.push({ coord: route.waypoints[totalPts - 1], idx: totalPts - 1 });
+          }
+
+          const beadMarkerObjs = [];
+          sampledBeads.forEach((b) => {
+            const beadMarker = L.circleMarker(b.coord, {
+              radius: 5.5,
+              fillColor: '#4f46e5',
+              fillOpacity: 1,
+              color: '#ffffff',
+              weight: 2.2,
+              className: 'evac-waypoint-bead'
+            });
+            beadMarker.bindTooltip(`
+              <div style="font-size: 11px; font-weight: bold; font-family: inherit;">
+                <span style="color: #6366f1; font-size: 12px;">●</span> Waypoint #${b.idx + 1}<br/>
+                <span style="color: #94a3b8; font-size: 10px;">Turn-by-turn road safety node</span>
+              </div>
+            `, { direction: 'top', offset: [0, -6] });
+            beadMarker.addTo(evacGroup);
+            beadMarkerObjs.push({ idx: b.idx, marker: beadMarker });
+          });
+          layersRef.current.beadMarkers = beadMarkerObjs;
 
           // Origin Lowland Vulnerability Node Marker
           const originIcon = L.divIcon({
@@ -510,10 +855,15 @@ export default function MapView({
 
           L.marker(route.origin_point.coords, { icon: originIcon })
             .bindPopup(`
-              <div style="font-size: 12px;">
+              <div style="font-size: 12px; font-family: inherit;">
                 <strong style="color: #ef4444;">Flooding Hazard Origin</strong><br/>
                 ${route.origin_point.name}<br/>
-                <span style="color: #94a3b8;">Evacuate via marked high-ground pathway</span>
+                <span style="color: #94a3b8;">Evacuate via marked high-ground road pathway</span>
+                <div style="margin-top: 8px;">
+                  <button onclick="window.__startEvacNav &amp;&amp; window.__startEvacNav()" style="width: 100%; padding: 6px 12px; background: linear-gradient(135deg, #2563eb, #4f46e5); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                    🧭 Start Turn-by-Turn GPS Navigation
+                  </button>
+                </div>
               </div>
             `)
             .addTo(evacGroup);
@@ -532,11 +882,16 @@ export default function MapView({
 
           L.marker(route.destination_shelter.coords, { icon: destIcon })
             .bindPopup(`
-              <div style="font-size: 12px;">
+              <div style="font-size: 12px; font-family: inherit;">
                 <strong style="color: #10b981; font-size: 13px;">Designated Relief Shelter (Destination)</strong><br/>
                 ${route.destination_shelter.name}<br/>
                 Distance: <strong>${route.distance_m}m (~${route.est_evacuation_time_mins} min walk)</strong><br/>
                 Elevation Gain: <strong style="color: #38bdf8;">+${route.elevation_gain_m}m above flood level</strong>
+                <div style="margin-top: 8px;">
+                  <button onclick="window.__startEvacNav &amp;&amp; window.__startEvacNav()" style="width: 100%; padding: 6px 12px; background: linear-gradient(135deg, #059669, #0d9488); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 4px 10px rgba(13, 148, 136, 0.4);">
+                    🧭 Start Turn-by-Turn GPS Navigation
+                  </button>
+                </div>
               </div>
             `)
             .addTo(evacGroup)
@@ -550,6 +905,110 @@ export default function MapView({
     evacGroup.addTo(map);
     layersRef.current.evacuation = evacGroup;
   }, [selectedWardId, layerVisibility.evacuationCorridors, riskZones, activeScenario]);
+
+  // 6b. Smooth Live GPS Navigation Overlay (Glides smoothly with user, zero blinking)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (!navActive || !activeEvacuationInfo?.waypoints?.length) {
+      if (layersRef.current.gpsTrackerLayer) {
+        map.removeLayer(layersRef.current.gpsTrackerLayer);
+        layersRef.current.gpsTrackerLayer = null;
+        layersRef.current.gpsPuckMarker = null;
+        layersRef.current.gpsAccuracyCircle = null;
+        layersRef.current.traveledPolyline = null;
+      }
+      if (layersRef.current.beadMarkers) {
+        layersRef.current.beadMarkers.forEach(b => {
+          b.marker.setStyle({ fillColor: '#4f46e5', color: '#ffffff' });
+        });
+      }
+      return;
+    }
+
+    const waypoints = activeEvacuationInfo.waypoints;
+    const activePos = userGpsCoords || waypoints[currentNavIndex] || activeEvacuationInfo.origin_point.coords;
+
+    const createGpsPuckIcon = (heading = 0) => {
+      return L.divIcon({
+        className: 'user-gps-puck-icon',
+        html: `
+          <div class="relative flex items-center justify-center" style="width: 48px; height: 48px;">
+            <div class="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping"></div>
+            <div class="absolute" style="transform: rotate(${heading}deg); transform-origin: center; top: 1px; transition: transform 0.3s ease-out;">
+              <div style="width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 15px solid #38bdf8; filter: drop-shadow(0 0 4px #0284c7);"></div>
+            </div>
+            <div class="relative w-6 h-6 rounded-full bg-blue-600 border-2 border-white shadow-2xl flex items-center justify-center text-white ring-4 ring-blue-500/40">
+              <div class="w-2 h-2 rounded-full bg-white"></div>
+            </div>
+          </div>
+        `,
+        iconSize: [48, 48],
+        iconAnchor: [24, 24]
+      });
+    };
+
+    // 1. Initialize GPS overlay layer if not yet created
+    if (!layersRef.current.gpsTrackerLayer) {
+      const gpsGroup = L.layerGroup();
+
+      // Traveled trail (solid bright cyan glowing line behind user)
+      const traveledLine = L.polyline([], {
+        color: '#06b6d4',
+        weight: 5,
+        opacity: 0.95,
+        lineJoin: 'round',
+        lineCap: 'round',
+        className: 'evac-traveled-path'
+      }).addTo(gpsGroup);
+
+      const accuracyCircle = L.circle(activePos, {
+        radius: 16,
+        color: '#38bdf8',
+        weight: 1.5,
+        fillColor: '#38bdf8',
+        fillOpacity: 0.15
+      }).addTo(gpsGroup);
+
+      const puckMarker = L.marker(activePos, {
+        icon: createGpsPuckIcon(gpsHeading),
+        zIndexOffset: 2000
+      }).addTo(gpsGroup);
+
+      gpsGroup.addTo(map);
+      layersRef.current.gpsTrackerLayer = gpsGroup;
+      layersRef.current.traveledPolyline = traveledLine;
+      layersRef.current.gpsAccuracyCircle = accuracyCircle;
+      layersRef.current.gpsPuckMarker = puckMarker;
+    }
+
+    // 2. Smooth in-place updates without tearing down layers or re-fetching
+    if (layersRef.current.gpsPuckMarker) {
+      layersRef.current.gpsPuckMarker.setLatLng(activePos);
+      layersRef.current.gpsPuckMarker.setIcon(createGpsPuckIcon(gpsHeading));
+    }
+
+    if (layersRef.current.gpsAccuracyCircle) {
+      layersRef.current.gpsAccuracyCircle.setLatLng(activePos);
+    }
+
+    if (layersRef.current.traveledPolyline) {
+      const traveledPts = waypoints.slice(0, currentNavIndex + 1);
+      layersRef.current.traveledPolyline.setLatLngs(traveledPts);
+    }
+
+    // 3. Smooth in-place update of waypoint bead colors
+    if (layersRef.current.beadMarkers) {
+      layersRef.current.beadMarkers.forEach(b => {
+        if (currentNavIndex >= b.idx) {
+          b.marker.setStyle({ fillColor: '#10b981', color: '#ffffff' });
+        } else {
+          b.marker.setStyle({ fillColor: '#4f46e5', color: '#ffffff' });
+        }
+      });
+    }
+  }, [navActive, currentNavIndex, userGpsCoords, gpsHeading, activeEvacuationInfo]);
 
   // 7. Render River Gauges & AWS Stations
   useEffect(() => {
@@ -691,6 +1150,96 @@ export default function MapView({
     layersRef.current.assets = assetGroup;
   }, [riskZones, layerVisibility.vulnerableAssets]);
 
+  // 9. Fetch & Render Live Active CAP Alert Badges Across India
+  useEffect(() => {
+    fetch('/api/alerts')
+      .then(r => r.json())
+      .then(data => {
+        if (data?.alerts) setActiveAlerts(data.alerts);
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    window.__aquaSelectAlertBasin = (lat, lon, stateName) => {
+      const map = mapInstanceRef.current;
+      if (map) {
+        map.flyTo([lat, lon], 12, { duration: 1.2 });
+      }
+      if (onLocationChange) {
+        onLocationChange({ lat, lon, name: `${stateName} Monitored Basin` });
+      }
+    };
+    return () => {
+      delete window.__aquaSelectAlertBasin;
+    };
+  }, [onLocationChange]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (layersRef.current.alerts) map.removeLayer(layersRef.current.alerts);
+    if (!layerVisibility.activeAlerts || !activeAlerts?.length) return;
+
+    const alertGroup = L.layerGroup();
+
+    activeAlerts.forEach((alert) => {
+      if (!alert.lat || !alert.lon) return;
+
+      const isRed = alert.severity === 'Severe';
+      const isOrange = alert.severity === 'High';
+      const badgeBg = isRed ? 'bg-red-600 ring-red-400' : isOrange ? 'bg-orange-500 ring-orange-300' : 'bg-amber-500 ring-amber-300';
+      const badgeIcon = isRed ? '🚨' : isOrange ? '⚠️' : '⚡';
+
+      const alertIcon = L.divIcon({
+        className: 'custom-alert-icon',
+        html: `
+          <div class="relative flex items-center justify-center cursor-pointer group">
+            <div class="w-8 h-8 rounded-full ${badgeBg} ring-4 ring-opacity-50 text-white flex items-center justify-center shadow-2xl animate-pulse transform group-hover:scale-125 transition-transform">
+              <span class="text-xs font-black">${badgeIcon}</span>
+            </div>
+            <div class="absolute -bottom-4 bg-slate-950/95 text-[9px] text-white font-extrabold px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap shadow-lg flex items-center gap-1">
+              <span>${alert.state}</span>
+            </div>
+          </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      const marker = L.marker([alert.lat, alert.lon], { icon: alertIcon })
+        .bindPopup(`
+          <div style="font-size: 12px; font-family: inherit; min-width: 220px; max-width: 280px; padding: 2px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <span style="background: ${isRed ? '#dc2626' : isOrange ? '#ea580c' : '#d97706'}; color: #fff; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; text-transform: uppercase;">
+                ${alert.severity} Alert
+              </span>
+              <span style="color: #94a3b8; font-size: 11px; font-weight: 600;">${alert.state}</span>
+            </div>
+            <strong style="color: #f8fafc; font-size: 12px; display: block; margin-bottom: 4px; line-height: 1.3;">${alert.headline}</strong>
+            <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 6px; line-height: 1.3;">
+              ${alert.area_desc}
+            </div>
+            <div style="font-size: 10px; color: #94a3b8; border-top: 1px solid #334155; padding-top: 4px; margin-bottom: 6px;">
+              Issued: <strong>${alert.sent}</strong><br/>
+              Rainfall Window: <span style="color: #38bdf8;">${alert.rainfall_time_window}</span>
+            </div>
+            <button
+              onclick="window.__aquaSelectAlertBasin && window.__aquaSelectAlertBasin(${alert.lat}, ${alert.lon}, '${alert.state}')"
+              style="width: 100%; background: #0284c7; color: white; border: none; border-radius: 6px; padding: 5px 8px; font-size: 11px; font-weight: bold; cursor: pointer;"
+            >
+              Zoom to ${alert.state} Basin →
+            </button>
+          </div>
+        `);
+      alertGroup.addLayer(marker);
+    });
+
+    alertGroup.addTo(map);
+    layersRef.current.alerts = alertGroup;
+  }, [activeAlerts, layerVisibility.activeAlerts]);
+
   // Debounced Search via /api/location/search
   useEffect(() => {
     if (!searchQuery || searchQuery.trim().length < 2) {
@@ -716,6 +1265,9 @@ export default function MapView({
   }, [searchQuery]);
 
   const handleSelectSuggestion = (item) => {
+    if (!isPointInIndia(item.lat, item.lon)) {
+      return;
+    }
     setSearchQuery(item.title);
     setSuggestions([]);
 
@@ -773,6 +1325,10 @@ export default function MapView({
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude, accuracy } = position.coords;
+        if (!isPointInIndia(latitude, longitude)) {
+          fallbackLocate("Location outside Indian territory");
+          return;
+        }
         const map = mapInstanceRef.current;
 
         fetch(`/api/location/reverse?lat=${latitude}&lon=${longitude}`)
@@ -899,23 +1455,23 @@ export default function MapView({
 
   const fallbackLocate = (reason) => {
     setIsLocating(false);
-    const targetWard = riskZones?.features?.find(f => f.properties.ward_id === 'ward-L-kurla-w') || riskZones?.features?.[0];
-    if (targetWard && mapInstanceRef.current) {
-      onSelectWard(targetWard.properties.ward_id);
-      mapInstanceRef.current.flyTo([19.070, 72.882], 14, { duration: 1.2 });
-    }
-
-    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      alert("GPS Permission Notice:\n\nMobile browsers (Chrome / Safari) disable device GPS on unencrypted HTTP.\n\nPlease open the HTTPS link to enable real GPS positioning in Bengaluru:\nhttps://directory-rough-cinema-amplifier.trycloudflare.com");
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.fitBounds([
+        [6.5, 68.0],
+        [36.5, 97.5]
+      ], { padding: [30, 30], maxZoom: 6 });
     }
   };
 
   const handleResetView = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([19.065, 72.875], 13, { duration: 0.8 });
+      mapInstanceRef.current.fitBounds([
+        [6.5, 68.0],
+        [36.5, 97.5]
+      ], { padding: [30, 30], maxZoom: 6 });
     }
     if (onLocationChange) {
-      onLocationChange({ lat: 19.076, lon: 72.877, name: 'Mumbai Metropolitan Basin' });
+      onLocationChange({ lat: 22.0, lon: 80.0, name: 'India National Flood Telemetry' });
     }
   };
 
@@ -956,6 +1512,34 @@ export default function MapView({
             </button>
           </div>
 
+          {/* Indian Basins Fast-Nav Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1.5 w-full">
+            {INDIAN_BASINS.map((b, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  if (mapInstanceRef.current) {
+                    if (b.name === 'India National Overview') {
+                      mapInstanceRef.current.fitBounds([
+                        [6.5, 68.0],
+                        [36.5, 97.5]
+                      ], { padding: [30, 30], maxZoom: 6 });
+                    } else {
+                      mapInstanceRef.current.flyTo([b.lat, b.lon], b.zoom, { duration: 1.0 });
+                    }
+                  }
+                  if (onLocationChange) {
+                    onLocationChange({ lat: b.lat, lon: b.lon, name: b.name });
+                  }
+                }}
+                className="bg-slate-900/95 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 rounded-lg px-2 py-0.5 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shadow-md transition-all flex items-center gap-1 shrink-0 cursor-pointer active:scale-95"
+              >
+                <span>{b.label}</span>
+              </button>
+            ))}
+          </div>
+
           {/* Autocomplete Dropdown */}
           {suggestions.length > 0 && (
             <div className="absolute left-0 right-0 mt-1.5 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-30 divide-y divide-slate-800 max-h-60 overflow-y-auto">
@@ -991,57 +1575,14 @@ export default function MapView({
           )}
         </div>
 
-        {/* Secondary Tool Row (Horizon + Tools) */}
+        {/* Secondary Tool Row (Basemap & Layer Tools) */}
         <div className="pointer-events-auto flex items-center justify-between sm:justify-end gap-1.5 w-full sm:w-auto relative z-30">
-          {/* Time Horizon Switcher */}
-          <div className="flex items-center bg-slate-900/95 backdrop-blur-md p-0.5 rounded-xl border border-slate-700/80 shadow-2xl shrink-0">
-            <button
-              onClick={() => setTimeHorizon('0-6h')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                timeHorizon === '0-6h'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {t.horizonRain}
-            </button>
-            <button
-              onClick={() => setTimeHorizon('6-24h')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                timeHorizon === '6-24h'
-                  ? 'bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {t.horizonFlood}
-            </button>
-          </div>
-
-          {/* Dynamic Surge Simulator Button */}
-          <button
-            onClick={() => {
-              setShowSurgeSimulator(!showSurgeSimulator);
-              setShowBasemapMenu(false);
-              setShowLayerMenu(false);
-            }}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border shadow-2xl transition-all shrink-0 ${
-              surgeDelta > 0 || showSurgeSimulator
-                ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-500/30'
-                : 'bg-slate-900/95 text-slate-200 border-slate-700/80 hover:bg-slate-800'
-            }`}
-            title="Simulate extreme rainfall storm surge"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">{t.surgeSim}</span> {surgeDelta > 0 ? `+${surgeDelta}mm` : ''}
-          </button>
-
           {/* CARTO Basemap Switcher */}
           <div className="relative shrink-0">
             <button
               onClick={() => {
                 setShowBasemapMenu(!showBasemapMenu);
                 setShowLayerMenu(false);
-                setShowSurgeSimulator(false);
               }}
               className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-[11px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors shadow-2xl cursor-pointer"
               title="CARTO Basemap Switcher"
@@ -1086,7 +1627,6 @@ export default function MapView({
               onClick={() => {
                 setShowLayerMenu(!showLayerMenu);
                 setShowBasemapMenu(false);
-                setShowSurgeSimulator(false);
               }}
               className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-[11px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors shadow-2xl cursor-pointer"
             >
@@ -1162,6 +1702,19 @@ export default function MapView({
                     />
                     <span>{t.layerEvacRoutes}</span>
                   </label>
+
+                  <label className="flex items-center gap-2.5 cursor-pointer text-red-400 font-semibold hover:text-red-300 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={layerVisibility.activeAlerts}
+                      onChange={(e) => setLayerVisibility({ ...layerVisibility, activeAlerts: e.target.checked })}
+                      className="accent-red-500 rounded w-4 h-4 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <span>🚨</span>
+                      <span>{t.layerActiveAlerts}</span>
+                    </span>
+                  </label>
                 </div>
               </>
             )}
@@ -1178,66 +1731,145 @@ export default function MapView({
         </div>
       </div>
 
-      {/* Interactive Storm Surge Simulator Drawer / Modal */}
-      {showSurgeSimulator && (
-        <div className="absolute top-28 sm:top-20 left-2 right-2 sm:left-auto sm:right-4 z-30 sm:w-80 bg-slate-900/98 backdrop-blur-xl p-3.5 rounded-2xl border border-amber-500/60 shadow-2xl text-xs space-y-2.5 animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-            <span className="font-bold text-amber-400 flex items-center gap-1.5 text-xs">
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              Dynamic Inundation Surge Sim
-            </span>
-            <button onClick={() => setShowSurgeSimulator(false)} className="text-slate-400 hover:text-white p-1">✕</button>
-          </div>
-          <p className="text-slate-300 text-[11px] leading-relaxed">
-            Simulate convective storm downpour over the catchment:
-          </p>
 
-          <div className="space-y-1">
-            <div className="flex items-center justify-between font-mono text-xs">
-              <span className="text-slate-400">Added Rainfall:</span>
-              <strong className="text-amber-400 text-sm">+{surgeDelta} mm</strong>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="10"
-              value={surgeDelta}
-              onChange={(e) => setSurgeDelta(Number(e.target.value))}
-              className="w-full accent-amber-500 cursor-pointer h-2"
-            />
-            <div className="flex justify-between text-[9px] text-slate-500 font-mono">
-              <span>0mm</span>
-              <span>+50mm</span>
-              <span>+100mm Cloudburst</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-[10px] sm:text-[11px] text-slate-300">
-            Est. Inundation: <strong className="text-red-400">+{Math.round(surgeDelta * 0.45)} cm</strong> water depth across basins.
-          </div>
-        </div>
-      )}
-
-      {/* Active Evacuation Path HUD Alert (Appears when route is shown) */}
+      {/* Active Evacuation Path & Live GPS Turn-by-Turn Navigation HUD */}
       {activeEvacuationInfo && (
-        <div className="absolute top-28 sm:top-20 left-2 right-2 sm:right-auto sm:left-4 z-20 bg-emerald-950/95 backdrop-blur-md border border-emerald-500/70 p-2.5 sm:p-3 rounded-xl shadow-2xl text-xs max-w-none sm:max-w-sm flex items-start gap-2 animate-in fade-in">
-          <Navigation className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-          <div className="space-y-0.5 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <strong className="text-emerald-300 text-xs font-bold">{t.safeCorridorActive}</strong>
-              <span className="text-[9px] bg-emerald-800 text-white px-1 rounded font-mono">
-                ~{activeEvacuationInfo.est_evacuation_time_mins} {t.walkTime}
-              </span>
+        navActive ? (
+          /* Live GPS Navigation Banner (Floating Top Center HUD) */
+          <div className="absolute top-28 sm:top-20 left-2 right-2 sm:left-1/2 sm:-translate-x-1/2 sm:max-w-xl z-30 bg-slate-900/98 backdrop-blur-xl border border-cyan-500/70 p-3 sm:p-3.5 rounded-2xl shadow-2xl text-slate-100 flex flex-col gap-2.5 animate-in slide-in-from-top-3">
+            {/* Top Row: Turn instruction + Live Remaining Distance */}
+            {(() => {
+              const nav = getNavProgress();
+              return (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-700 border border-cyan-400/50 flex items-center justify-center text-white shadow-lg shrink-0">
+                      {nav.maneuver === 'right' ? (
+                        <CornerUpRight className="w-5 h-5 text-cyan-200" />
+                      ) : nav.maneuver === 'left' ? (
+                        <CornerUpLeft className="w-5 h-5 text-cyan-200" />
+                      ) : nav.maneuver === 'arrived' ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-300 animate-bounce" />
+                      ) : (
+                        <ArrowUp className="w-5 h-5 text-cyan-200" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] uppercase tracking-wider text-cyan-400 font-bold flex items-center gap-1.5 truncate">
+                        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping inline-block"></span>
+                        {t.gpsNavActive || 'Live GPS Road Guidance'} &bull; +{activeEvacuationInfo.elevation_gain_m}m Safe High Ground
+                      </span>
+                      <h3 className="text-xs sm:text-sm font-bold text-white truncate mt-0.5">
+                        {nav.instruction}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm sm:text-base font-black text-emerald-400 font-mono">
+                      {nav.remainingDist}m
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      ~{nav.remainingMins} min walk
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Bottom Row: Simulation & Navigation Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[11px] gap-1 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={toggleSimulation}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-medium flex items-center gap-1 border border-slate-700 shadow transition-colors cursor-pointer"
+                >
+                  {isSimulatingGps ? (
+                    <Pause className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>{isSimulatingGps ? 'Pause Walk' : 'Simulate Movement'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={recenterMapOnGps}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                  title="Recenter on My GPS Location"
+                >
+                  <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">Recenter</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAutoPanGps(!autoPanGps)}
+                  className={`px-2 py-1 rounded-lg border text-[10px] font-medium transition-colors cursor-pointer ${
+                    autoPanGps 
+                      ? 'bg-cyan-950/70 border-cyan-800 text-cyan-300' 
+                      : 'bg-slate-800 border-slate-700 text-slate-400'
+                  }`}
+                  title="Auto-follow camera while moving"
+                >
+                  Auto-Pan: {autoPanGps ? 'ON' : 'OFF'}
+                </button>
+
+                {activeEvacuationInfo.google_maps_url && (
+                  <a
+                    href={activeEvacuationInfo.google_maps_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-800 text-blue-300 flex items-center gap-1 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3 text-blue-400" />
+                    <span className="hidden sm:inline">Google Maps</span>
+                  </a>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={stopNavigation}
+                className="px-2.5 py-1 rounded-lg bg-red-600/80 hover:bg-red-500 text-white font-bold flex items-center gap-1 shadow transition-colors cursor-pointer ml-auto"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Exit Nav</span>
+              </button>
             </div>
-            <p className="text-[11px] text-emerald-200 leading-snug truncate">
-              {activeEvacuationInfo.distance_m}m to {activeEvacuationInfo.destination_shelter.name}
-            </p>
-            <span className="text-[10px] text-cyan-300 font-mono block">
-              {t.elevationGain}: +{activeEvacuationInfo.elevation_gain_m}m
-            </span>
           </div>
-        </div>
+        ) : (
+          /* Safe Corridor Preview Card (When route is visible but navigation not started) */
+          <div className="absolute top-28 sm:top-20 left-2 right-2 sm:right-auto sm:left-4 z-20 bg-emerald-950/95 backdrop-blur-md border border-emerald-500/70 p-3 rounded-xl shadow-2xl text-xs max-w-none sm:max-w-sm flex flex-col gap-2 animate-in fade-in">
+            <div className="flex items-start gap-2">
+              <Navigation className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5 animate-pulse" />
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <strong className="text-emerald-300 text-xs font-bold">{t.safeCorridorActive}</strong>
+                  <span className="text-[9px] bg-emerald-800 text-white px-1 rounded font-mono">
+                    ~{activeEvacuationInfo.est_evacuation_time_mins} {t.walkTime}
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-200 leading-snug truncate">
+                  {activeEvacuationInfo.distance_m}m to {activeEvacuationInfo.destination_shelter.name}
+                </p>
+                <span className="text-[10px] text-cyan-300 font-mono block">
+                  {t.elevationGain}: +{activeEvacuationInfo.elevation_gain_m}m above flood level
+                </span>
+              </div>
+            </div>
+
+            {/* Start Live GPS Navigation Button */}
+            <button
+              type="button"
+              onClick={startNavigation}
+              className="w-full py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/60 transition-all cursor-pointer border border-teal-400/30"
+            >
+              <Navigation className="w-3.5 h-3.5 text-cyan-200 animate-pulse" />
+              <span>{t.startGpsNav || '🧭 Start Turn-by-Turn GPS Navigation'}</span>
+            </button>
+          </div>
+        )
       )}
 
       {/* Floating Bottom-Left GIS Map Legend & Radar Controls (Responsive Collapsible on Mobile) */}

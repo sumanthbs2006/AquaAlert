@@ -10,7 +10,13 @@ from datetime import datetime, timezone
 import urllib.parse
 import requests
 import numpy as np
-from backend.database import WARDS_DATA, generate_regional_wards, estimate_base_elevation
+from backend.database import (
+    WARDS_DATA, 
+    generate_regional_wards, 
+    estimate_base_elevation,
+    get_active_alert_for_location,
+    get_alert_crisis_params
+)
 from backend.ml_engine import ml_engine
 from backend.ingestion import ingestion_manager
 from backend.openweather import get_live_weather
@@ -42,16 +48,26 @@ def get_risk_zones_geojson(
     """
     scenario = ingestion_manager.get_current_scenario()
     wards = WARDS_DATA
-
-    if lat is not None and lon is not None:
+    is_national = (name and "india" in name.lower()) or (lat is not None and abs(lat - 22.5) < 2.0 and lon is not None and abs(lon - 79.0) < 2.0)
+    active_alert = None
+    if not is_national and lat is not None and lon is not None:
+        active_alert = get_active_alert_for_location(lat, lon, name or "")
         min_d = min(((lat - w["center"][0])**2 + (lon - w["center"][1])**2)**0.5 for w in WARDS_DATA)
         if min_d > 0.22:
             wards = generate_regional_wards(lat, lon, name or "Searched Location")
 
+    # If the user is inspecting an active alert zone, synchronize the risk parameters with the active alert!
+    if active_alert:
+        run_params = get_alert_crisis_params(active_alert)
+        scenario_title = f"Active CAP Advisory: {active_alert.get('headline', active_alert.get('event', 'Emergency Alert'))}"
+    else:
+        run_params = scenario.get("params")
+        scenario_title = scenario["name"]
+
     features = []
     for ward in wards:
         # Run ML engine prediction for this ward
-        pred = ml_engine.predict_ward_risk(ward, scenario.get("params"))
+        pred = ml_engine.predict_ward_risk(ward, run_params)
 
         # Map risk level to standard disaster color palette
         color_map = {
@@ -154,7 +170,7 @@ def get_ward_forecast(ward_id: str):
             is_highland = any(w in name_lower for w in ["hill", "ridge", "high", "heights", "peak", "plateau", "mount"])
             
             p_slope = 3.5 if is_highland else (0.7 if is_lowland else 1.6)
-            p_elev = base_elev + (10.0 if is_highland else (-4.0 if is_lowland else 0.0))
+            p_elev = 18.0 if is_highland else (2.8 if is_lowland else 6.5)
             p_imperv = 60.0 if is_highland else (86.0 if is_lowland else 75.0)
             p_drain = 65.0 if is_highland else (32.0 if is_lowland else 48.0)
             
@@ -164,24 +180,103 @@ def get_ward_forecast(ward_id: str):
                 "code": "REGIONAL",
                 "zone": "Inspected Region",
                 "population": 150000,
-                "avg_elevation_m": round(max(3.0, p_elev), 1),
+                "avg_elevation_m": p_elev,
+                "actual_altitude_m": base_elev,
                 "terrain_slope_deg": p_slope,
                 "impervious_surface_pct": p_imperv,
                 "drainage_density_idx": p_drain,
-                "antecedent_moisture_pct": 70.0,
+                "antecedent_moisture_pct": 85.0 if is_lowland else 72.0,
                 "historical_waterlogging_frequency": "Very High" if is_lowland else ("Low" if is_highland else "Moderate"),
                 "center": [lat, lon],
                 "vulnerable_assets": [
-                    {"name": f"Local Infrastructure near {name.split(',')[0]}", "type": "transit", "lat": lat, "lon": lon, "vulnerability": "Moderate"}
+                    {"name": f"Local Infrastructure near {name.split(',')[0]}", "type": "transit", "lat": lat, "lon": lon, "vulnerability": "Severe" if is_lowland else "Moderate"}
                 ],
                 "nearest_shelter": {"name": f"{name.split(',')[0]} Municipal Relief Shelter", "lat": round(lat + 0.005, 4), "lon": round(lon + 0.005, 4), "capacity": 750, "occupied": 10}
             }
 
     scenario = ingestion_manager.get_current_scenario()
     sc_id = scenario.get("id", "live_weather")
+    
+    # Check if this ward or inspected coordinate belongs to an Active CAP Disaster Alert Zone
+    active_alert = get_active_alert_for_location(lat, lon, name, ward_id)
+    matched_alert_dict = None
+    if active_alert:
+        matched_alert_dict = {
+            "id": active_alert.get("id"),
+            "severity": active_alert.get("severity"),
+            "headline": active_alert.get("headline"),
+            "instruction": active_alert.get("instruction"),
+            "state": active_alert.get("state"),
+            "sent": active_alert.get("sent"),
+            "area_desc": active_alert.get("areaDesc"),
+            "rainfall_time_window": active_alert.get("rainfall_time_window"),
+            "inundation_time_window": active_alert.get("inundation_time_window")
+        }
 
     if is_out:
-        if sc_id == "live_weather":
+        if active_alert:
+            # Active Emergency Warning Zone: Synchronize directly with CAP Disaster Advisory
+            alert_params = get_alert_crisis_params(active_alert)
+            pred = ml_engine.predict_ward_risk(ward, alert_params)
+            sev = active_alert.get("severity", "Severe").capitalize()
+
+            if sev == "Severe":
+                nowcast_6h = 38.5
+                alert_depth = 54.0
+                alert_depth_range = "40 - 65 cm"
+                peak_hr = "T+2 hrs"
+                pred["risk_level"] = "Severe"
+                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 86.5), 1)
+            elif sev == "High":
+                nowcast_6h = 28.0
+                alert_depth = 38.0
+                alert_depth_range = "30 - 50 cm"
+                peak_hr = "T+2 hrs"
+                pred["risk_level"] = "High"
+                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 72.0), 1)
+            else:
+                nowcast_6h = 12.0
+                alert_depth = 18.0
+                alert_depth_range = "15 - 25 cm"
+                peak_hr = "T+3 hrs"
+                pred["risk_level"] = "Moderate"
+                pred["risk_score"] = round(max(float(pred.get("risk_score", 0)), 48.0), 1)
+
+            hourly_series = []
+            for h in range(1, 25):
+                h_rain = round(nowcast_6h * 0.35, 1) if h <= 2 else (round(nowcast_6h * 0.2, 1) if h <= 5 else 0.5)
+                h_depth = alert_depth if (2 <= h <= 6) else (round(alert_depth * 0.7, 1) if h <= 10 else round(alert_depth * 0.3, 1))
+                hourly_series.append({
+                    "hour": f"+{h}h",
+                    "time_label": f"T+{h:02d}:00",
+                    "rainfall_mm": h_rain,
+                    "inundation_depth_cm": h_depth,
+                    "river_level_m": round(alert_params["river_surge_m"] + 0.3, 2)
+                })
+
+            xai_factors = [
+                {"factor_key": "active_alert", "label": f"{active_alert.get('event', 'Active Emergency Flood Directive')}", "contribution_pct": 45},
+                {"factor_key": "radar_reflectivity_dbz", "label": f"DWR Radar Reflectivity ({alert_params['radar_peak_dbz']} dBZ)", "contribution_pct": 25},
+                {"factor_key": "river_gauge_ratio", "label": f"Foothill River / Torrent Runoff Surge (+{alert_params['river_surge_m']}m)", "contribution_pct": 18},
+                {"factor_key": "drainage_constriction_idx", "label": "Lowland Culvert & Outfall Surcharge", "contribution_pct": 12}
+            ]
+
+            pred["predicted_depth_cm"] = alert_depth
+            pred["depth_range_cm"] = alert_depth_range
+            pred["rainfall_nowcast_6h_mm"] = nowcast_6h
+            pred["peak_rainfall_hr"] = peak_hr
+            pred["explainability_factors"] = xai_factors
+            pred["hourly_forecast"] = hourly_series
+            pred["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+            scenario_name = f"Active CAP Warning ({active_alert.get('state', 'Regional')} SDMA)"
+            evacuation_advice = {
+                "is_evacuation_recommended": True if pred["risk_level"] in ["High", "Severe"] else False,
+                "primary_shelter": ward.get("nearest_shelter", {}).get("name") if ward.get("nearest_shelter") else "Designated District Relief Shelter",
+                "shelter_distance_approx": "580m",
+                "advisory_notes": active_alert.get("instruction") or f"Active {active_alert.get('severity')} flood advisory issued by State Disaster Management Authority."
+            }
+        elif sc_id == "live_weather":
             # Real-time atmospheric measurements from OpenWeatherMap (with resilient gateway fallback)
             live_data = get_live_weather(lat, lon)
             live_rain = float(live_data.get("rain_1h_mm", 0.0) or 0.0)
@@ -282,6 +377,7 @@ def get_ward_forecast(ward_id: str):
         "prediction": pred,
         "active_scenario": scenario_name,
         "is_outside_basin": is_out,
+        "matched_alert": matched_alert_dict,
         "evacuation_advice": evacuation_advice
     }
 

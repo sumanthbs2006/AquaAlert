@@ -132,7 +132,9 @@ class HydrologicalMLEngine:
         base_river_ratio = 0.92 if "mithi" in ward.get("name", "").lower() or "kurla" in ward.get("name", "").lower() else 0.65
         river_ratio = base_river_ratio + (params.get("river_surge_m", 0.0) * 0.15)
         
-        elevation = ward.get("avg_elevation_m", 8.0)
+        raw_elevation = ward.get("avg_elevation_m", 8.0)
+        # Normalize elevation to relative catchment depression depth (1.5m to 25m) for hydrological model consistency
+        elevation = min(25.0, max(1.5, float(raw_elevation))) if raw_elevation > 30.0 else max(1.5, float(raw_elevation))
         slope = ward.get("terrain_slope_deg", 1.0)
         impervious = ward.get("impervious_surface_pct", 80.0)
         drainage_constriction = 100.0 - ward.get("drainage_density_idx", 40.0)
@@ -167,8 +169,8 @@ class HydrologicalMLEngine:
 
         # Base physical vulnerability index (0 to 100) based on local GIS topography:
         # Lower elevation, flat terrain, concrete coverage, and drainage bottlenecks increase vulnerability
-        elev_val = max(1.0, float(elevation))
-        elev_factor = max(0.0, min(1.0, (40.0 - min(elev_val, 40.0)) / 38.0))   # 0 for high plateau/ridge, 1 for sea-level
+        elev_val = min(25.0, max(1.0, float(elevation)))
+        elev_factor = max(0.0, min(1.0, (25.0 - elev_val) / 23.0))   # 0 for high ridge, 1 for lowland depression
         slope_factor = max(0.0, min(1.0, (4.5 - min(float(slope), 4.5)) / 4.2)) # 0 for steep hills, 1 for flat plains
         imperv_factor = max(0.3, min(1.0, float(impervious) / 100.0))
         drain_factor = max(0.2, min(1.0, float(drainage_constriction) / 100.0))
@@ -190,15 +192,15 @@ class HydrologicalMLEngine:
         if base_rain < 3.0:
             # During dry / clear weather:
             # Risk score is dictated by genuine intrinsic local topographic & drainage susceptibility
-            # Yields a dynamic spread (e.g. 5.5 for elevated ridge up to 28.5 for low-lying sump)
-            base_dry_score = 4.0 + (geo_vulnerability * 0.25) + (base_rain * 2.5)
-            risk_score = round(max(4.0, min(32.0, base_dry_score)), 1)
-            risk_level = "Low" if risk_score < 24.0 else "Moderate"
+            # Yields a dynamic spread (e.g. 5.5 for elevated ridge up to 25.0 for low-lying sump)
+            base_dry_score = 4.0 + (geo_vulnerability * 0.20) + (base_rain * 2.0)
+            risk_score = round(max(4.0, min(30.0, base_dry_score)), 1)
+            risk_level = "Low" if risk_score <= 30.0 else "Moderate"
             pred_depth = 0.0
         else:
             # Dynamic rain scaling combined with tree model
             risk_score = round(max(15.0, min(99.0, (risk_score * 0.65) + (geo_vulnerability * 0.35))), 1)
-            if risk_score < 30.0:
+            if risk_score <= 30.0:
                 risk_level = "Low"
                 pred_depth = round(max(0.0, min(pred_depth, 8.0)), 1)
             elif risk_score < 60.0:

@@ -170,19 +170,17 @@ export default function Navbar({
             </span>
           </button>
 
-          {userRole === 'authority' && (
-            <button
-              onClick={() => handleNavClick('admin')}
-              className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                currentPage === 'admin'
-                  ? 'bg-red-500/15 text-red-400 border border-red-500/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Activity className="w-4 h-4" />
-              {t.controlRoom}
-            </button>
-          )}
+          <button
+            onClick={() => handleNavClick('admin')}
+            className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              currentPage === 'admin'
+                ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            {t.controlRoom}
+          </button>
 
           <button
             onClick={() => handleNavClick('about')}
@@ -197,7 +195,7 @@ export default function Navbar({
           </button>
         </nav>
 
-        {/* Right Tools: Role Toggle & Language & Mobile Menu Button */}
+        {/* Right Tools: Language Picker & Mobile Menu Button */}
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Language Picker (Desktop) */}
           <div className="hidden sm:block relative">
@@ -212,37 +210,6 @@ export default function Navbar({
                 </option>
               ))}
             </select>
-          </div>
-
-          {/* Role Switcher Pill (Compact) */}
-          <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 shrink-0">
-            <button
-              onClick={() => setUserRole('citizen')}
-              className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold transition-all ${
-                userRole === 'citizen'
-                  ? 'bg-cyan-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Citizen View"
-            >
-              {t.citizenRole}
-            </button>
-            <button
-              onClick={() => {
-                setUserRole('authority');
-                setCurrentPage('admin');
-                setMobileMenuOpen(false);
-              }}
-              className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1 ${
-                userRole === 'authority'
-                  ? 'bg-red-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Authority View"
-            >
-              <UserCheck className="w-3 h-3" />
-              {t.authorityRole}
-            </button>
           </div>
 
           {/* Mobile Hamburger Menu Button (Visible on mobile < 768px) */}
@@ -290,25 +257,21 @@ export default function Navbar({
               </span>
             </button>
 
-            {userRole === 'authority' && (
-              <button
-                onClick={() => handleNavClick('admin')}
-                className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all col-span-2 ${
-                  currentPage === 'admin'
-                    ? 'bg-red-600 text-white'
-                    : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Activity className="w-4 h-4" />
-                {t.controlRoom}
-              </button>
-            )}
+            <button
+              onClick={() => handleNavClick('admin')}
+              className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                currentPage === 'admin'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              {t.controlRoom}
+            </button>
 
             <button
               onClick={() => handleNavClick('about')}
               className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-                userRole === 'authority' ? 'col-span-2' : ''
-              } ${
                 currentPage === 'about'
                   ? 'bg-slate-700 text-white'
                   : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'

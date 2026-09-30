@@ -108,6 +108,9 @@ def search_location(
         except Exception:
             pass
 
+    # Territorial filter: ensure all results are strictly within Indian geographic bounds
+    results = [r for r in results if 6.0 <= r.get("lat", 0) <= 37.5 and 68.0 <= r.get("lon", 0) <= 97.5]
+
     return {
         "status": "success",
         "query": query,
@@ -125,6 +128,20 @@ def reverse_geocode(
     Reverse geocodes GPS coordinates into real user address (e.g. Bengaluru, Karnataka)
     and maps to nearest flood zone or creates an on-the-fly local inspection area.
     """
+    # Guard: Strictly within Indian territorial bounds
+    if not (6.0 <= lat <= 37.5 and 68.0 <= lon <= 97.5):
+        return {
+            "status": "error",
+            "message": "Coordinates outside Indian territorial boundaries. AquaAlert AI monitors India only.",
+            "coordinates": {"lat": lat, "lon": lon},
+            "place_name": "Territory Outside India",
+            "city": "Outside India",
+            "loc_id": None,
+            "is_in_pilot_catchment": False,
+            "matched_flood_ward": None,
+            "advice": "Map inspection and flood monitoring are active within Indian national boundaries only."
+        }
+
     place_name = f"Location ({round(lat, 3)}, {round(lon, 3)})"
     city = "India"
     try:

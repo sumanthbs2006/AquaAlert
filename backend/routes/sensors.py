@@ -32,7 +32,8 @@ def get_sensors(
     surge_m = params.get("river_surge_m", 0.0)
 
     sensor_list = SENSOR_STATIONS
-    if lat is not None and lon is not None:
+    is_national = (name and "india" in name.lower()) or (lat is not None and abs(lat - 22.5) < 2.0 and lon is not None and abs(lon - 79.0) < 2.0)
+    if not is_national and lat is not None and lon is not None:
         min_d = min(((lat - s["lat"])**2 + (lon - s["lon"])**2)**0.5 for s in SENSOR_STATIONS)
         if min_d > 0.22:
             sensor_list = generate_regional_sensors(lat, lon, name or "Searched Location")

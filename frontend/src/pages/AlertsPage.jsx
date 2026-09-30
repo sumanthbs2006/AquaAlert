@@ -7,7 +7,6 @@ import {
   Radio, 
   Smartphone, 
   MessageSquare, 
-  FileCode, 
   CheckCircle2, 
   AlertOctagon, 
   X, 
@@ -18,15 +17,13 @@ import {
 } from 'lucide-react';
 import { getTranslation } from '../i18n';
 
-export default function AlertsPage({ currentLang, setCurrentLang }) {
+export default function AlertsPage({ currentLang, setCurrentLang, onNavigateToLocation }) {
   const t = getTranslation(currentLang);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeverity, setSelectedSeverity] = useState('ALL');
   const [selectedAlertForPreview, setSelectedAlertForPreview] = useState(null);
   const [previewChannel, setPreviewChannel] = useState('cell_broadcast'); // 'cell_broadcast', 'whatsapp', 'sms'
-  const [showCapModal, setShowCapModal] = useState(false);
-  const [capXmlContent, setCapXmlContent] = useState('');
 
   useEffect(() => {
     fetchAlerts();
@@ -43,15 +40,6 @@ export default function AlertsPage({ currentLang, setCurrentLang }) {
       .catch((err) => {
         console.error('Error fetching alerts:', err);
         setLoading(false);
-      });
-  };
-
-  const handleFetchCapXml = () => {
-    fetch('/api/alerts/export/cap-xml')
-      .then((res) => res.text())
-      .then((xml) => {
-        setCapXmlContent(xml);
-        setShowCapModal(true);
       });
   };
 
@@ -80,13 +68,18 @@ export default function AlertsPage({ currentLang, setCurrentLang }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-800/80 text-emerald-400 text-xs px-3 py-1.5 rounded-xl font-semibold shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            Live National Feeds Active
+          </span>
           <button
-            onClick={handleFetchCapXml}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3.5 py-2 rounded-xl font-semibold border border-slate-700 transition-colors shadow"
+            onClick={fetchAlerts}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl font-semibold border border-slate-700 transition-colors shadow cursor-pointer"
+            title="Refresh Live National Alerts"
           >
-            <FileCode className="w-4 h-4 text-cyan-400" />
-            {t.viewCapXml}
+            <Clock className="w-3.5 h-3.5 text-cyan-400" />
+            Sync Feeds
           </button>
         </div>
       </div>
@@ -232,13 +225,24 @@ export default function AlertsPage({ currentLang, setCurrentLang }) {
                         Target Geo-Zone: <strong className="text-slate-200">{alert.area_desc}</strong>
                       </span>
 
-                      <button
-                        onClick={() => setSelectedAlertForPreview(alert)}
-                        className="flex items-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow"
-                      >
-                        <Smartphone className="w-3.5 h-3.5" />
-                        {t.testBroadcastModal}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => onNavigateToLocation && onNavigateToLocation(alert)}
+                          className="flex items-center gap-1.5 bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"
+                          title="Open GIS Dashboard at this alert location"
+                        >
+                          <MapPin className="w-3.5 h-3.5 text-cyan-200" />
+                          <span>{t.viewInGisDashboard || "View on GIS Map →"}</span>
+                        </button>
+
+                        <button
+                          onClick={() => setSelectedAlertForPreview(alert)}
+                          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow cursor-pointer"
+                        >
+                          <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+                          {t.testBroadcastModal}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -378,62 +382,6 @@ export default function AlertsPage({ currentLang, setCurrentLang }) {
               >
                 Close Preview
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CAP v1.2 XML Viewer Modal */}
-      {showCapModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="bg-slate-950 p-4 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono font-bold text-cyan-400 block">
-                  CAP v1.2 ITU-T X.1303 EXPORT
-                </span>
-                <h3 className="text-sm font-bold text-white">
-                  Common Alerting Protocol Machine-Readable Document
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowCapModal(false)}
-                className="text-slate-400 hover:text-white p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto p-4 bg-slate-950 font-mono text-[11px] text-emerald-300">
-              <pre>{capXmlContent}</pre>
-            </div>
-
-            <div className="bg-slate-950 p-3 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">
-                Ready for NDMA SACHET / CWC integration
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    const blob = new Blob([capXmlContent], { type: 'application/xml' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'aquaalert_cap_v1.2.xml';
-                    a.click();
-                  }}
-                  className="flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-semibold transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Save .XML File
-                </button>
-                <button
-                  onClick={() => setShowCapModal(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3.5 py-1.5 rounded-lg font-semibold transition-colors"
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>
         </div>

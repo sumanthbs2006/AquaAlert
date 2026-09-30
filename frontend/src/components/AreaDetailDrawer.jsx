@@ -33,7 +33,9 @@ export default function AreaDetailDrawer({
   onClose,
   activeScenario,
   activeScenarioName,
-  currentLang = 'en'
+  currentLang = 'en',
+  isNavigating = false,
+  onStartNavigation
 }) {
   const t = getTranslation(currentLang);
   const [forecastData, setForecastData] = useState(null);
@@ -334,6 +336,18 @@ export default function AreaDetailDrawer({
                   Occupancy: {ward?.nearest_shelter?.occupied} / {ward?.nearest_shelter?.capacity} beds occupied (Open for public admission)
                 </p>
               </div>
+
+              {/* Live GPS Evacuation Navigation Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onStartNavigation) onStartNavigation();
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 active:scale-98 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-teal-950/60 transition-all cursor-pointer border border-teal-400/30"
+              >
+                <Navigation className="w-4 h-4 text-cyan-200 animate-pulse shrink-0" />
+                <span>{isNavigating ? t.gpsNavActive : t.startGpsNav}</span>
+              </button>
               
               <a
                 href="tel:1916"
