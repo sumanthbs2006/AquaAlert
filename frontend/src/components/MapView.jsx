@@ -1280,7 +1280,7 @@ export default function MapView({
     map.flyTo([item.lat, item.lon], 15, { duration: 1.2 });
 
     if (onLocationChange) {
-      onLocationChange({ lat: item.lat, lon: item.lon, name: item.title });
+      onLocationChange({ lat: item.lat, lon: item.lon, name: item.title, isUserAction: true, source: 'search' });
     }
 
     const locId = item.ward_id || `loc_${item.lat}_${item.lon}_${encodeURIComponent(item.title)}`;
@@ -1381,7 +1381,13 @@ export default function MapView({
               gpsMarker.bindPopup(popupHtml).openPopup();
 
               if (onLocationChange) {
-                onLocationChange({ lat: latitude, lon: longitude, name: data.place_name || data.city || 'My Location' });
+                onLocationChange({ 
+                  lat: latitude, 
+                  lon: longitude, 
+                  name: data.place_name || data.city || 'My GPS Location', 
+                  isUserAction: true, 
+                  source: 'gps' 
+                });
               }
 
               if (data.loc_id) {
@@ -1488,7 +1494,22 @@ export default function MapView({
         {/* Search Bar with Mappls / Local Autocomplete */}
         <div className="pointer-events-auto relative w-full sm:max-w-md">
           <div className="flex items-center gap-1.5 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/80 shadow-2xl">
-            <form onSubmit={(e) => { e.preventDefault(); if (suggestions[0]) handleSelectSuggestion(suggestions[0]); }} className="flex-1 flex items-center gap-1.5 px-2 min-w-0">
+            <form 
+              onSubmit={async (e) => { 
+                e.preventDefault(); 
+                if (suggestions[0]) {
+                  handleSelectSuggestion(suggestions[0]); 
+                } else if (searchQuery && searchQuery.trim().length >= 2) {
+                  try {
+                    const r = await fetch(`/api/location/search?q=${encodeURIComponent(searchQuery)}`).then(res => res.json());
+                    if (r?.results?.[0]) handleSelectSuggestion(r.results[0]);
+                  } catch (err) {
+                    console.error('Direct search submit error:', err);
+                  }
+                }
+              }} 
+              className="flex-1 flex items-center gap-1.5 px-2 min-w-0"
+            >
               <Search className={`w-3.5 h-3.5 shrink-0 ${isSearching ? 'text-cyan-400 animate-spin' : 'text-slate-400'}`} />
               <input
                 type="text"
@@ -1533,7 +1554,7 @@ export default function MapView({
                     }
                   }
                   if (onLocationChange) {
-                    onLocationChange({ lat: b.lat, lon: b.lon, name: b.name });
+                    onLocationChange({ lat: b.lat, lon: b.lon, name: b.name, isUserAction: true, source: 'basin' });
                   }
                 }}
                 className="bg-slate-900/95 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 rounded-lg px-2 py-0.5 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shadow-md transition-all flex items-center gap-1 shrink-0 cursor-pointer active:scale-95"

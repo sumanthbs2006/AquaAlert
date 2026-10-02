@@ -115,19 +115,6 @@ export default function AlertsPage({
               </p>
             </div>
           </div>
-
-          <button
-            onClick={() => onTriggerSmsForAlert && onTriggerSmsForAlert(null, {
-              area_name: currentRegion?.name || 'Local Basin',
-              hazard_type: 'Urgent Weather & Flood Advisory Test',
-              rainfall_mm_hr: 75.0,
-              severity: 'Severe'
-            })}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all active:scale-95 shrink-0"
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Test SMS Output to My Handset</span>
-          </button>
         </div>
       ) : (
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between text-xs text-slate-300">
@@ -280,16 +267,6 @@ export default function AlertsPage({
                       </span>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        {/* Send SMS Alert to Registered Mobile */}
-                        <button
-                          onClick={() => onTriggerSmsForAlert && onTriggerSmsForAlert(alert)}
-                          className="flex items-center gap-1.5 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow-lg hover:shadow-red-500/25 active:scale-95 cursor-pointer ring-1 ring-red-400/40"
-                          title={`Transmit official flood warning SMS to ${currentUser?.phone || 'registered handset'}`}
-                        >
-                          <Smartphone className="w-3.5 h-3.5 text-white animate-bounce" />
-                          <span>{currentUser?.phone ? `Send SMS to ${currentUser.phone}` : "Send SMS to My Phone"}</span>
-                        </button>
-
                         <button
                           onClick={() => onNavigateToLocation && onNavigateToLocation(alert)}
                           className="flex items-center gap-1.5 bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"

@@ -138,7 +138,7 @@ export default function App() {
   };
 
   // Handle User Search or Geolocation Anywhere
-  const handleLocationChange = async ({ lat, lon, name }) => {
+  const handleLocationChange = async ({ lat, lon, name, isUserAction = false, source = 'unknown' }) => {
     try {
       const isRegional = Math.hypot(lat - 19.076, lon - 72.877) > 0.22;
       setCurrentRegion({ lat, lon, name, isRegional });
@@ -149,6 +149,11 @@ export default function App() {
       ]);
       setRiskZones(rzRes);
       setSensors(sensorsRes);
+
+      // Trigger emergency SMS alert ONLY when user explicitly gives location or uses GPS and an alert is nearby!
+      if (isUserAction && currentUser?.phone) {
+        await checkAndDispatchProximitySms(lat, lon, name, source);
+      }
     } catch (e) {
       console.error('Failed to load regional telemetry:', e);
     }
@@ -281,78 +286,71 @@ export default function App() {
     }
   };
 
-  // Automated Flood & Proximity Alert Monitor: Whenever there is an alert near the user, sends SMS to registered phone
-  useEffect(() => {
+  // Proximity Alert Dispatcher: ONLY triggered when user provides their location or uses GPS and an alert is nearby
+  const checkAndDispatchProximitySms = async (targetLat, targetLon, targetName, actionSource = 'unknown') => {
     if (!currentUser?.phone) return;
 
-    const basinRain = sensorsSummary?.avg_basin_rain_mm_hr;
-    const scenarioId = activeScenario?.id || '';
-    const isCloudburst = scenarioId === 'cloudburst';
-    const isCyclone = scenarioId === 'cyclone_surge' || scenarioId === 'cyclone';
-    
-    // Check if any active CAP alert is near the user's location
-    const alertNearUser = activeAlerts.find(a => {
-      if (typeof a.lat === 'number' && typeof a.lon === 'number' && typeof currentRegion?.lat === 'number') {
-        const dLat = (a.lat - currentRegion.lat) * 111;
-        const dLon = (a.lon - currentRegion.lon) * 111 * Math.cos(currentRegion.lat * Math.PI / 180);
-        const distKm = Math.sqrt(dLat * dLat + dLon * dLon);
-        if (distKm <= 85) return true;
+    try {
+      // 1. Query the backend proximity intelligence endpoint (evaluates active calamities, coordinates, active scenarios)
+      const proxRes = await fetch(
+        `/api/alerts/check-proximity?phone=${encodeURIComponent(currentUser.phone)}&lat=${targetLat}&lon=${targetLon}&area_name=${encodeURIComponent(targetName || '')}`
+      ).then(r => r.json());
+
+      let alertToTrigger = null;
+      if (proxRes?.has_alert_nearby && proxRes.alert) {
+        alertToTrigger = proxRes.alert;
+      } else {
+        // Fallback client check: Haversine distance (<= 75km) or matching disaster tokens
+        const haversineDistKm = (lat1, lon1, lat2, lon2) => {
+          const R = 6371;
+          const dLat = (lat2 - lat1) * Math.PI / 180;
+          const dLon = (lon2 - lon1) * Math.PI / 180;
+          const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+        const normName = (targetName || '').toLowerCase();
+        for (const a of activeAlerts) {
+          if (a.severity === 'Severe' || a.severity === 'High') {
+            if (typeof a.lat === 'number' && typeof a.lon === 'number' && typeof targetLat === 'number') {
+              const d = haversineDistKm(targetLat, targetLon, a.lat, a.lon);
+              if (d <= 75.0) {
+                alertToTrigger = a;
+                break;
+              }
+            }
+            const aDesc = (a.area_desc || '').toLowerCase();
+            const aState = (a.state || '').toLowerCase();
+            const tokens = ['dehradun', 'rishikesh', 'song', 'tapkeshwar', 'patna', 'ganga', 'kankarbagh', 'rajendra nagar', 'kolkata'];
+            if (tokens.some(tok => normName.includes(tok) && (aDesc.includes(tok) || aState.includes(tok)))) {
+              alertToTrigger = a;
+              break;
+            }
+          }
+        }
       }
-      const cName = (currentRegion?.name || '').toLowerCase();
-      const aDesc = (a.area_desc || '').toLowerCase();
-      const aState = (a.state || '').toLowerCase();
-      const tokens = ['mumbai', 'kurla', 'mithi', 'patna', 'ganga', 'dehradun', 'rishikesh', 'bengaluru', 'kolkata'];
-      return tokens.some(tok => cName.includes(tok) && (aDesc.includes(tok) || aState.includes(tok)));
-    });
 
-    const currentRainRate = typeof basinRain === 'number' 
-      ? basinRain 
-      : (isCloudburst ? 85.0 : (isCyclone ? 60.0 : (alertNearUser ? 65.0 : 15.0)));
-    
-    // Check if any active risk zone has severe or critical inundation
-    const hasSevereRiskZone = Array.isArray(riskZones?.features) && riskZones.features.some(f => {
-      const lvl = (f.properties?.risk_level || f.properties?.flood_risk || '').toLowerCase();
-      return lvl === 'severe' || lvl === 'critical' || lvl === 'high';
-    });
+      // If NO alert near user's location, DO NOT SEND ANY SMS!
+      if (!alertToTrigger) {
+        console.log(`[AquaAlert Location Check] ${targetName} (${targetLat}, ${targetLon}) has NO active flood alert within 75km. No SMS dispatched.`);
+        return;
+      }
 
-    const isRiverDanger = sensorsSummary?.peak_river_danger_status === 'DANGER';
+      // Proximity match found: Dispatch emergency SMS alert to user's registered phone
+      const alertId = alertToTrigger.id || alertToTrigger.identifier || 'alert';
+      const dedupeKey = `${currentUser.phone}_${alertId}_${targetName}`;
+      if (dispatchedHazardKeys.current.has(dedupeKey)) return;
+      dispatchedHazardKeys.current.add(dedupeKey);
 
-    // Condition: Alert near user, or heavy rain (>= 25 mm/h), or cloudburst, or cyclone, or high/severe flood risk
-    const isThreatNearUser = alertNearUser || currentRainRate >= 25.0 || isCloudburst || isCyclone || hasSevereRiskZone || isRiverDanger;
-
-    if (!isThreatNearUser) return;
-
-    // Build deduplication key per session to avoid spamming the user on every render
-    const areaName = currentRegion?.name || alertNearUser?.area_desc || 'Local Basin';
-    const rainBucket = Math.round(currentRainRate / 10) * 10;
-    const dedupeKey = `${currentUser.phone}_${areaName}_${alertNearUser?.id || scenarioId}_${rainBucket}_${isRiverDanger ? 'D' : 'W'}`;
-
-    if (dispatchedHazardKeys.current.has(dedupeKey)) return;
-    dispatchedHazardKeys.current.add(dedupeKey);
-
-    const severity = (currentRainRate >= 60 || isRiverDanger || isCloudburst) ? 'Severe' : 'High';
-    const hazardType = alertNearUser?.headline || (isCloudburst 
-      ? 'Cloudburst & Flash Flood Surge'
-      : (isCyclone ? 'Cyclonic Torrent & Coastal Tidal Inundation' : (currentRainRate >= 50 ? 'Torrential Monsoon Downpour & Flood Inundation' : 'Heavy Rainfall & Waterlogging Alert')));
-
-    handleTriggerSmsForAlert(alertNearUser, {
-      area_name: areaName,
-      hazard_type: hazardType,
-      rainfall_mm_hr: currentRainRate,
-      severity: severity
-    });
-  }, [
-    currentUser?.phone,
-    activeAlerts,
-    sensorsSummary?.avg_basin_rain_mm_hr,
-    sensorsSummary?.peak_river_danger_status,
-    activeScenario?.id,
-    riskZones,
-    currentRegion?.name,
-    currentRegion?.lat,
-    currentRegion?.lon,
-    currentLang
-  ]);
+      await handleTriggerSmsForAlert(alertToTrigger, {
+        area_name: targetName || alertToTrigger.area_desc || 'Your Monitored Location',
+        hazard_type: alertToTrigger.headline || 'Active Flood Warning',
+        rainfall_mm_hr: alertToTrigger.rainfall_mm_hr || (alertToTrigger.severity === 'Severe' ? 75.0 : 50.0),
+        severity: alertToTrigger.severity || 'Severe'
+      });
+    } catch (err) {
+      console.warn('Error evaluating proximity SMS:', err);
+    }
+  };
 
   // Test button action inside SMS Inbox dialog
   const handleTriggerTestSms = async () => {
@@ -455,7 +453,6 @@ export default function App() {
                 isNavigating={isNavigating}
                 onStartNavigation={() => setIsNavigating(true)}
                 currentUser={currentUser}
-                onTriggerSmsForArea={(details) => handleTriggerSmsForAlert(null, details)}
               />
             )}
           </div>

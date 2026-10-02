@@ -12,8 +12,7 @@ import {
   PhoneCall, 
   Sliders, 
   CheckCircle2,
-  Info,
-  Smartphone
+  Info
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -37,8 +36,7 @@ export default function AreaDetailDrawer({
   currentLang = 'en',
   isNavigating = false,
   onStartNavigation,
-  currentUser,
-  onTriggerSmsForArea
+  currentUser
 }) {
   const t = getTranslation(currentLang);
   const [forecastData, setForecastData] = useState(null);
@@ -148,24 +146,6 @@ export default function AreaDetailDrawer({
             </div>
           </div>
 
-          {/* Direct Emergency SMS Dispatch Button for this area */}
-          <button
-            type="button"
-            onClick={() => {
-              if (onTriggerSmsForArea) {
-                onTriggerSmsForArea({
-                  area_name: ward?.name || 'Selected Ward',
-                  hazard_type: `${ward?.name || 'Local Ward'} Flood Inundation & Heavy Rainfall Alert`,
-                  severity: pred?.risk_level || 'Severe',
-                  rainfall_mm_hr: pred?.rainfall_nowcast_6h_mm || 55.0
-                });
-              }
-            }}
-            className="w-full py-2.5 px-3 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 active:scale-98 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-950/60 transition-all cursor-pointer border border-red-400/40"
-          >
-            <Smartphone className="w-4 h-4 animate-bounce shrink-0" />
-            <span>{currentUser?.phone ? `Send Ward SMS Alert to ${currentUser.phone}` : "Send Ward SMS Alert to My Phone"}</span>
-          </button>
 
           {/* AI Decision Support & Confidence Telemetry */}
           <div className="grid grid-cols-2 gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800/80 text-xs">

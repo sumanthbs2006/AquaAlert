@@ -549,16 +549,33 @@ def check_user_proximity(
     proximity (<= 75km) or direct geographic boundary of an active CAP flood warning.
     """
     from backend.database import haversine_distance_km
+    from backend.ingestion import ingestion_manager
     
     nearby_alert = None
     min_dist = 9999.0
     user_area_str = (area_name or "").lower()
+    active_sc_id = getattr(ingestion_manager, 'active_scenario_id', 'live_weather')
+    is_mumbai_scenario_active = active_sc_id in ["cloudburst", "cyclone_surge", "cyclone", "heavy_monsoon"]
 
-    for alert in ACTIVE_ALERTS:
+    # Candidate alerts: Severe and High alerts, or Mumbai baseline if a flood scenario is active
+    candidate_alerts = []
+    for a in ACTIVE_ALERTS:
+        sev = a.get("severity", "")
+        if sev in ["Severe", "High"]:
+            candidate_alerts.append(a)
+        elif is_mumbai_scenario_active and a.get("id") == "ALERT-LIVE-MH-006":
+            # Upgrade Mumbai alert to Severe for this active disaster scenario
+            disaster_a = dict(a)
+            disaster_a["severity"] = "Severe"
+            disaster_a["headline"] = f"RED ALERT: {active_sc_id.replace('_', ' ').title()} & Flash Inundation across Mumbai Basin"
+            candidate_alerts.append(disaster_a)
+
+    for alert in candidate_alerts:
         a_lat = alert.get("lat")
         a_lon = alert.get("lon")
         alert_area = (alert.get("areaDesc") or "").lower()
         alert_state = (alert.get("state") or "").lower()
+        alert_head = (alert.get("headline") or "").lower()
 
         # 1. Geographic Coordinate Proximity
         if lat is not None and lon is not None and a_lat is not None and a_lon is not None:
@@ -569,9 +586,9 @@ def check_user_proximity(
                     nearby_alert = alert
 
         # 2. Text Keyword Matching
-        tokens = ["mumbai", "kurla", "mithi", "dharavi", "patna", "ganga", "dehradun", "rishikesh", "song", "bengaluru", "kolkata"]
+        tokens = ["mumbai", "kurla", "mithi", "dharavi", "patna", "ganga", "dehradun", "rishikesh", "song", "kolkata"]
         for tok in tokens:
-            if tok in user_area_str and (tok in alert_area or tok in alert_state):
+            if tok in user_area_str and (tok in alert_area or tok in alert_state or tok in alert_head):
                 nearby_alert = alert
                 min_dist = min(min_dist, 5.0)
                 break
