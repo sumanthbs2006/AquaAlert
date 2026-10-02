@@ -13,7 +13,8 @@ import {
   ChevronDown,
   LogOut,
   LogIn,
-  User
+  User,
+  Smartphone
 } from 'lucide-react';
 import { getTranslation } from '../i18n';
 
@@ -30,7 +31,9 @@ export default function Navbar({
   sensorsSummary,
   currentUser,
   onLogout,
-  onOpenLogin
+  onOpenLogin,
+  onOpenSmsInbox,
+  smsHistoryCount = 0
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const t = getTranslation(currentLang);
@@ -187,6 +190,21 @@ export default function Navbar({
             </select>
           </div>
 
+          {/* SMS Alerts Notification Trigger (Desktop) */}
+          {currentUser && (
+            <button
+              onClick={onOpenSmsInbox}
+              title={`Emergency SMS Alerts sent to ${currentUser.phone || 'your phone'}`}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-950/70 hover:bg-red-900/90 border border-red-700/60 text-red-200 text-xs font-semibold transition-all shadow-sm cursor-pointer group"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-red-400 group-hover:scale-110 transition-transform animate-pulse" />
+              <span className="hidden md:inline">SMS Alerts</span>
+              <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full min-w-[18px] text-center shadow">
+                {smsHistoryCount}
+              </span>
+            </button>
+          )}
+
           {/* User Auth Status / Action (Desktop) */}
           {currentUser ? (
             <div className="hidden sm:flex items-center gap-1.5 bg-slate-900/90 border border-slate-700 rounded-lg p-1">
@@ -316,24 +334,42 @@ export default function Navbar({
             </div>
 
             {/* User Profile / Auth Status (Mobile) */}
-            <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+            <div className="pt-2 border-t border-slate-800 space-y-2">
               {currentUser ? (
                 <>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span className="text-xs font-bold text-cyan-300">
-                      {currentUser.phone || currentUser.name}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span className="text-xs font-bold text-cyan-300">
+                        {currentUser.phone || currentUser.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        onLogout();
+                      }}
+                      className="px-2.5 py-1 bg-red-950/80 border border-red-700/80 hover:bg-red-900 text-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Logout</span>
+                    </button>
                   </div>
+
                   <button
                     onClick={() => {
                       setMobileMenuOpen(false);
-                      onLogout();
+                      onOpenSmsInbox();
                     }}
-                    className="px-2.5 py-1 bg-red-950/80 border border-red-700/80 hover:bg-red-900 text-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    className="w-full py-2 px-3 bg-red-950/70 hover:bg-red-900 border border-red-700/70 text-red-200 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer"
                   >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Logout</span>
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 text-red-400" />
+                      <span>Emergency SMS Alerts</span>
+                    </div>
+                    <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {smsHistoryCount}
+                    </span>
                   </button>
                 </>
               ) : (

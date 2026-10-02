@@ -33,6 +33,12 @@ CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")
 MAPPLS_REST_KEY = os.environ.get("MAPPLS_REST_KEY", "")
 OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "a8e781c27ffac99e8d41e324ef9fd544")
 
+# Infobip SMS Gateway Configuration
+INFOBIP_API_KEY = os.environ.get("INFOBIP_API_KEY", "0d284b36ba0d3329b79388f979fa71c7-aeb70f1e-960c-4bfc-ad1e-e81896bbfd0b")
+INFOBIP_BASE_URL = os.environ.get("INFOBIP_BASE_URL", "https://api.infobip.com").rstrip("/")
+INFOBIP_SENDER = os.environ.get("INFOBIP_SENDER", "AquaAlert")
+EMERGENCY_RESCUE_AUTHORITY_PHONE = os.environ.get("EMERGENCY_RESCUE_AUTHORITY_PHONE", "+919422310700")
+
 # CARTO Basemap Styles with authenticated tile URL templates
 CARTO_BASEMAPS = {
     "dark_matter": {

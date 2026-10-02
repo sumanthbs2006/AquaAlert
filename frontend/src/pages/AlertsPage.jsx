@@ -17,7 +17,15 @@ import {
 } from 'lucide-react';
 import { getTranslation } from '../i18n';
 
-export default function AlertsPage({ currentLang, setCurrentLang, onNavigateToLocation }) {
+export default function AlertsPage({ 
+  currentLang, 
+  setCurrentLang, 
+  onNavigateToLocation,
+  currentUser,
+  onTriggerSmsForAlert,
+  currentRegion,
+  smsHistory = []
+}) {
   const t = getTranslation(currentLang);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +91,52 @@ export default function AlertsPage({ currentLang, setCurrentLang, onNavigateToLo
           </button>
         </div>
       </div>
+
+      {/* Registered Handset SMS Alert Output Status Banner */}
+      {currentUser?.phone ? (
+        <div className="bg-gradient-to-r from-red-950/80 via-slate-900 to-amber-950/80 border border-red-500/50 rounded-2xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400 shrink-0">
+              <Smartphone className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-red-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block"></span>
+                  Emergency SMS Alert Output Service Active
+                </span>
+                <span className="text-[10px] bg-red-900/60 text-red-200 border border-red-700/60 px-2 py-0.2 rounded-full font-mono">
+                  TRAI-DND Priority 1
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Registered Handset: <strong className="text-cyan-300 font-mono text-sm">{currentUser.phone}</strong>
+                <span className="text-slate-400 ml-2 hidden sm:inline">• Automated SMS warnings are dispatched whenever an alert is near your location.</span>
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onTriggerSmsForAlert && onTriggerSmsForAlert(null, {
+              area_name: currentRegion?.name || 'Local Basin',
+              hazard_type: 'Urgent Weather & Flood Advisory Test',
+              rainfall_mm_hr: 75.0,
+              severity: 'Severe'
+            })}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all active:scale-95 shrink-0"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Test SMS Output to My Handset</span>
+          </button>
+        </div>
+      ) : (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between text-xs text-slate-300">
+          <div className="flex items-center gap-2">
+            <Smartphone className="w-4 h-4 text-cyan-400" />
+            <span>Login with your Indian mobile number to enable automated emergency SMS alerts sent to your phone.</span>
+          </div>
+        </div>
+      )}
 
       {/* Severity Filter Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -226,6 +280,16 @@ export default function AlertsPage({ currentLang, setCurrentLang, onNavigateToLo
                       </span>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Send SMS Alert to Registered Mobile */}
+                        <button
+                          onClick={() => onTriggerSmsForAlert && onTriggerSmsForAlert(alert)}
+                          className="flex items-center gap-1.5 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow-lg hover:shadow-red-500/25 active:scale-95 cursor-pointer ring-1 ring-red-400/40"
+                          title={`Transmit official flood warning SMS to ${currentUser?.phone || 'registered handset'}`}
+                        >
+                          <Smartphone className="w-3.5 h-3.5 text-white animate-bounce" />
+                          <span>{currentUser?.phone ? `Send SMS to ${currentUser.phone}` : "Send SMS to My Phone"}</span>
+                        </button>
+
                         <button
                           onClick={() => onNavigateToLocation && onNavigateToLocation(alert)}
                           className="flex items-center gap-1.5 bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"

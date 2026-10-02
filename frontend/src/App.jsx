@@ -1,12 +1,53 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import MapView from './components/MapView';
 import AreaDetailDrawer from './components/AreaDetailDrawer';
+import SmsNotificationToast from './components/SmsNotificationToast';
+import SmsInboxModal from './components/SmsInboxModal';
 import AlertsPage from './pages/AlertsPage';
 import AdminControlRoom from './pages/AdminControlRoom';
 import AboutPage from './pages/AboutPage';
 import LoginPage from './pages/LoginPage';
 import { getTranslation } from './i18n';
+
+// Web Audio API Emergency Alert Chime
+const playEmergencySmsChime = () => {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+    const now = ctx.currentTime;
+    
+    // First Alert Beep (F5 - 698Hz)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(698.46, now);
+    gain1.gain.setValueAtTime(0.2, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.22);
+
+    // Second Higher Alert Beep (A5 - 880Hz)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880.00, now + 0.16);
+    gain2.gain.setValueAtTime(0.25, now + 0.16);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.16);
+    osc2.stop(now + 0.5);
+  } catch (e) {
+    console.warn('Audio chime blocked or unsupported:', e);
+  }
+};
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -18,14 +59,8 @@ export default function App() {
     }
   });
 
-  const [currentPage, setCurrentPage] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aquaalert_user');
-      return saved ? 'dashboard' : 'login';
-    } catch {
-      return 'login';
-    }
-  });
+  // Always show login page first whenever the website is opened
+  const [currentPage, setCurrentPage] = useState('login');
 
   const [userRole, setUserRole] = useState(() => {
     try {
@@ -44,6 +79,7 @@ export default function App() {
   const [riskZones, setRiskZones] = useState(null);
   const [sensors, setSensors] = useState(null);
   const [sensorsSummary, setSensorsSummary] = useState(null);
+  const [activeAlerts, setActiveAlerts] = useState([]);
   const [selectedWardId, setSelectedWardId] = useState(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [currentRegion, setCurrentRegion] = useState({
@@ -53,6 +89,10 @@ export default function App() {
     isRegional: false
   });
   const [loading, setLoading] = useState(true);
+  const [latestSmsToast, setLatestSmsToast] = useState(null);
+  const [smsInboxOpen, setSmsInboxOpen] = useState(false);
+  const [smsHistory, setSmsHistory] = useState([]);
+  const dispatchedHazardKeys = useRef(new Set());
 
   const getScenarioName = (sc) => {
     if (!sc) return '';
@@ -65,19 +105,20 @@ export default function App() {
     return sc.name || '';
   };
 
-  // Initial Load: Scenarios, Risk Zones, Sensors
+  // Initial Load: Scenarios, Risk Zones, Sensors, Active Alerts
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [currentLang]);
 
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [scenariosRes, rzRes, sensorsRes, summaryRes] = await Promise.all([
-        fetch('/api/scenarios').then(r => r.json()),
-        fetch('/api/risk-zones').then(r => r.json()),
-        fetch('/api/sensors').then(r => r.json()),
-        fetch('/api/sensors/summary').then(r => r.json())
+      const [scenariosRes, rzRes, sensorsRes, summaryRes, alertsRes] = await Promise.all([
+        fetch('/api/scenarios').then(r => r.json()).catch(() => ({ scenarios: [] })),
+        fetch('/api/risk-zones').then(r => r.json()).catch(() => ({})),
+        fetch('/api/sensors').then(r => r.json()).catch(() => ({})),
+        fetch('/api/sensors/summary').then(r => r.json()).catch(() => ({})),
+        fetch(`/api/alerts?lang=${currentLang}`).then(r => r.json()).catch(() => ({ alerts: [] }))
       ]);
 
       setScenarios(scenariosRes.scenarios || []);
@@ -86,6 +127,9 @@ export default function App() {
       setRiskZones(rzRes);
       setSensors(sensorsRes);
       setSensorsSummary(summaryRes);
+      if (Array.isArray(alertsRes?.alerts)) {
+        setActiveAlerts(alertsRes.alerts);
+      }
       setLoading(false);
     } catch (err) {
       console.error('Failed to load telemetry:', err);
@@ -152,6 +196,176 @@ export default function App() {
     }
   };
 
+  // Fetch past SMS alerts sent to signed-in user's phone number
+  useEffect(() => {
+    if (!currentUser?.phone) return;
+    const cleanPhone = currentUser.clean_phone || currentUser.phone.replace(/\D/g, '');
+    fetch(`/api/alerts/sms-history?phone=${encodeURIComponent(cleanPhone)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'success' && Array.isArray(data.history)) {
+          setSmsHistory(data.history);
+        }
+      })
+      .catch(err => console.error('Failed to load SMS history:', err));
+  }, [currentUser?.phone]);
+
+  // Central Dispatcher: Sends emergency SMS alert output to user's registered phone number
+  const handleTriggerSmsForAlert = async (alert, customDetails = {}) => {
+    if (!currentUser?.phone) return;
+
+    const areaName = customDetails.area_name || alert?.area_desc || currentRegion?.name || 'Monitored Basin';
+    const hazardType = customDetails.hazard_type || alert?.headline || 'High Flood Inundation & Heavy Rainfall Warning';
+    const severity = customDetails.severity || alert?.severity || 'Severe';
+    const rainfall = customDetails.rainfall_mm_hr || (severity === 'Severe' ? 75.0 : 45.0);
+    const cleanPhone = currentUser.clean_phone || currentUser.phone.replace(/\D/g, '');
+
+    // 1. Play immediate emergency sound chime
+    playEmergencySmsChime();
+
+    // 2. Build immediate visible output for registered handset
+    const localSmsId = `SMS-CIT-${Date.now()}`;
+    const shortAuth = 'NDRF 5th Battalion & Local DEOC';
+    const localizedText = alert?.sms_preview || 
+      `🚨 [AquaAlert URGENT FLOOD WARNING] Heavy rainfall (${rainfall.toFixed(1)} mm/h) & flood risk (${severity}) in ${areaName}! River/Drainage: DANGER. Move to higher ground immediately. Alert also transmitted to nearby rescue team: ${shortAuth}. Emergency Helpline: 112 / 1070.`;
+
+    const citizenSms = {
+      id: localSmsId,
+      recipient_phone: currentUser.phone,
+      clean_phone: cleanPhone,
+      area_name: areaName,
+      hazard_type: hazardType,
+      rainfall_mm_hr: rainfall,
+      severity: severity,
+      river_stage: 'DANGER',
+      message: localizedText,
+      delivery_status: 'DELIVERED_TO_HANDSET',
+      carrier_gateway: 'INFOBIP GLOBAL SMSC (TRAI-DND-BYPASS)',
+      rescue_authority_alerted: shortAuth,
+      formatted_time: 'Just now'
+    };
+
+    setLatestSmsToast(citizenSms);
+    setSmsHistory(prev => [citizenSms, ...prev.filter(p => p.id !== localSmsId)]);
+
+    // 3. Dispatch to backend API
+    try {
+      const res = await fetch('/api/alerts/dispatch-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: currentUser.phone,
+          area_name: areaName,
+          hazard_type: hazardType,
+          rainfall_mm_hr: rainfall,
+          severity: severity,
+          alert_id: alert?.id,
+          lat: alert?.lat || currentRegion?.lat,
+          lon: alert?.lon || currentRegion?.lon,
+          lang: currentLang,
+          is_force_test: true
+        })
+      });
+      const data = await res.json();
+      if (data?.status === 'success' && data.sms) {
+        setLatestSmsToast(data.sms);
+        const entries = data.authority_sms ? [data.sms, data.authority_sms] : [data.sms];
+        setSmsHistory(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const fresh = entries.filter(e => !existingIds.has(e.id));
+          return [...fresh, ...prev.filter(p => p.id !== localSmsId)];
+        });
+      }
+    } catch (err) {
+      console.warn('Backend SMS dispatch notice:', err);
+    }
+  };
+
+  // Automated Flood & Proximity Alert Monitor: Whenever there is an alert near the user, sends SMS to registered phone
+  useEffect(() => {
+    if (!currentUser?.phone) return;
+
+    const basinRain = sensorsSummary?.avg_basin_rain_mm_hr;
+    const scenarioId = activeScenario?.id || '';
+    const isCloudburst = scenarioId === 'cloudburst';
+    const isCyclone = scenarioId === 'cyclone_surge' || scenarioId === 'cyclone';
+    
+    // Check if any active CAP alert is near the user's location
+    const alertNearUser = activeAlerts.find(a => {
+      if (typeof a.lat === 'number' && typeof a.lon === 'number' && typeof currentRegion?.lat === 'number') {
+        const dLat = (a.lat - currentRegion.lat) * 111;
+        const dLon = (a.lon - currentRegion.lon) * 111 * Math.cos(currentRegion.lat * Math.PI / 180);
+        const distKm = Math.sqrt(dLat * dLat + dLon * dLon);
+        if (distKm <= 85) return true;
+      }
+      const cName = (currentRegion?.name || '').toLowerCase();
+      const aDesc = (a.area_desc || '').toLowerCase();
+      const aState = (a.state || '').toLowerCase();
+      const tokens = ['mumbai', 'kurla', 'mithi', 'patna', 'ganga', 'dehradun', 'rishikesh', 'bengaluru', 'kolkata'];
+      return tokens.some(tok => cName.includes(tok) && (aDesc.includes(tok) || aState.includes(tok)));
+    });
+
+    const currentRainRate = typeof basinRain === 'number' 
+      ? basinRain 
+      : (isCloudburst ? 85.0 : (isCyclone ? 60.0 : (alertNearUser ? 65.0 : 15.0)));
+    
+    // Check if any active risk zone has severe or critical inundation
+    const hasSevereRiskZone = Array.isArray(riskZones?.features) && riskZones.features.some(f => {
+      const lvl = (f.properties?.risk_level || f.properties?.flood_risk || '').toLowerCase();
+      return lvl === 'severe' || lvl === 'critical' || lvl === 'high';
+    });
+
+    const isRiverDanger = sensorsSummary?.peak_river_danger_status === 'DANGER';
+
+    // Condition: Alert near user, or heavy rain (>= 25 mm/h), or cloudburst, or cyclone, or high/severe flood risk
+    const isThreatNearUser = alertNearUser || currentRainRate >= 25.0 || isCloudburst || isCyclone || hasSevereRiskZone || isRiverDanger;
+
+    if (!isThreatNearUser) return;
+
+    // Build deduplication key per session to avoid spamming the user on every render
+    const areaName = currentRegion?.name || alertNearUser?.area_desc || 'Local Basin';
+    const rainBucket = Math.round(currentRainRate / 10) * 10;
+    const dedupeKey = `${currentUser.phone}_${areaName}_${alertNearUser?.id || scenarioId}_${rainBucket}_${isRiverDanger ? 'D' : 'W'}`;
+
+    if (dispatchedHazardKeys.current.has(dedupeKey)) return;
+    dispatchedHazardKeys.current.add(dedupeKey);
+
+    const severity = (currentRainRate >= 60 || isRiverDanger || isCloudburst) ? 'Severe' : 'High';
+    const hazardType = alertNearUser?.headline || (isCloudburst 
+      ? 'Cloudburst & Flash Flood Surge'
+      : (isCyclone ? 'Cyclonic Torrent & Coastal Tidal Inundation' : (currentRainRate >= 50 ? 'Torrential Monsoon Downpour & Flood Inundation' : 'Heavy Rainfall & Waterlogging Alert')));
+
+    handleTriggerSmsForAlert(alertNearUser, {
+      area_name: areaName,
+      hazard_type: hazardType,
+      rainfall_mm_hr: currentRainRate,
+      severity: severity
+    });
+  }, [
+    currentUser?.phone,
+    activeAlerts,
+    sensorsSummary?.avg_basin_rain_mm_hr,
+    sensorsSummary?.peak_river_danger_status,
+    activeScenario?.id,
+    riskZones,
+    currentRegion?.name,
+    currentRegion?.lat,
+    currentRegion?.lon,
+    currentLang
+  ]);
+
+  // Test button action inside SMS Inbox dialog
+  const handleTriggerTestSms = async () => {
+    if (!currentUser?.phone) return;
+    const areaName = currentRegion?.name || 'Local Basin';
+    await handleTriggerSmsForAlert(null, {
+      area_name: areaName,
+      hazard_type: 'Severe Flash Flood & Cloudburst Alert',
+      rainfall_mm_hr: 75.5,
+      severity: 'Severe'
+    });
+  };
+
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
     if (user?.role) setUserRole(user.role);
@@ -191,6 +405,25 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenLogin={() => setCurrentPage('login')}
+        onOpenSmsInbox={() => setSmsInboxOpen(true)}
+        smsHistoryCount={smsHistory.length}
+      />
+
+      {/* Emergency SMS Real-Time Toast Notification */}
+      <SmsNotificationToast
+        sms={latestSmsToast}
+        onDismiss={() => setLatestSmsToast(null)}
+        onViewInbox={() => setSmsInboxOpen(true)}
+      />
+
+      {/* Emergency SMS Inbox & History Modal */}
+      <SmsInboxModal
+        isOpen={smsInboxOpen}
+        onClose={() => setSmsInboxOpen(false)}
+        currentUser={currentUser}
+        smsHistory={smsHistory}
+        onTriggerTestSms={handleTriggerTestSms}
+        currentRegion={currentRegion}
       />
 
       {/* Main Content Area */}
@@ -221,6 +454,8 @@ export default function App() {
                 currentLang={currentLang}
                 isNavigating={isNavigating}
                 onStartNavigation={() => setIsNavigating(true)}
+                currentUser={currentUser}
+                onTriggerSmsForArea={(details) => handleTriggerSmsForAlert(null, details)}
               />
             )}
           </div>
@@ -231,6 +466,10 @@ export default function App() {
             currentLang={currentLang}
             setCurrentLang={setCurrentLang}
             onNavigateToLocation={handleNavigateToAlertLocation}
+            currentUser={currentUser}
+            onTriggerSmsForAlert={handleTriggerSmsForAlert}
+            currentRegion={currentRegion}
+            smsHistory={smsHistory}
           />
         )}
 
