@@ -148,7 +148,7 @@ def is_heavy_rainfall_or_flood(
 ) -> bool:
     """
     Validates whether the meteorological/hydrological telemetry strictly qualifies
-    as heavy rainfall (>= 25 mm/h) or flood emergency near the monitored area.
+    as heavy, severe, or moderate rainfall (>= 15 mm/h) or flood emergency near the monitored area.
     """
     rain = float(rainfall_mm_hr or 0.0)
     depth = float(inundation_depth_cm or 0.0)
@@ -156,20 +156,24 @@ def is_heavy_rainfall_or_flood(
     sev = str(severity or "").strip().capitalize()
     ht = str(hazard_type or "").strip().lower()
 
-    # IMD heavy rain criteria (>= 25 mm/h)
-    if rain >= 25.0:
+    # IMD criteria: Moderate (>= 15.0 mm/h), Heavy (>= 25.0 mm/h), or Severe (>= 65.0 mm/h)
+    if rain >= 15.0:
         return True
-    # Waterlogging / inundation threshold (>= 15 cm)
-    if depth >= 15.0:
+    # Waterlogging / inundation threshold (>= 10 cm)
+    if depth >= 10.0:
         return True
-    # Critical river stage
-    if stage in ["DANGER", "CRITICAL", "HIGH", "SEVERE", "EXTREME"]:
+    # Critical or warning river stage
+    if stage in ["DANGER", "CRITICAL", "HIGH", "SEVERE", "EXTREME", "WARNING", "ALERT"]:
         return True
-    # Severity indicator
-    if sev in ["Severe", "Critical", "High", "Red", "Orange"]:
+    # Severity indicators: Severe, Critical, High, Moderate, Red, Orange, Yellow
+    if sev in ["Severe", "Critical", "High", "Moderate", "Red", "Orange", "Yellow"]:
         return True
-    # Flood keywords in hazard description
-    flood_keywords = ["flood", "inundation", "cloudburst", "cyclone", "torrential", "heavy rain", "waterlogging", "surge", "overflow"]
+    # Flood & rain keywords in hazard description
+    flood_keywords = [
+        "flood", "inundation", "cloudburst", "cyclone", "torrential", 
+        "heavy rain", "waterlogging", "surge", "overflow", "monsoon", 
+        "moderate", "downpour", "thunderstorm", "flash flood"
+    ]
     if any(k in ht for k in flood_keywords):
         return True
 
@@ -186,6 +190,17 @@ def format_emergency_sms(
 ) -> str:
     lang = lang.lower() if lang else "en"
     short_auth = authority_name.split('&')[0].strip() if authority_name else "NDRF/SDRF Rescue QRT"
+    sev_str = str(severity or "").strip()
+    is_moderate = (sev_str.lower() == "moderate") or (rainfall_mm_hr < 40.0 and sev_str.lower() not in ["severe", "critical", "high"])
+
+    if is_moderate:
+        if lang == "hi":
+            return f"⚠️ [एक्वाअलर्ट मानसूनी चेतावनी] {area_name} में {rainfall_mm_hr:.1f} मिमी/घंटा मध्यम मानसूनी बारिश। जल निकासी स्तर: {river_stage}। नगर निगम पंप सक्रिय हैं। निचले जलभराव वाले रास्तों पर सावधानी बरतें। बचाव दल: {short_auth}। हेल्पलाइन: 1916 / 112।"
+        elif lang == "kn":
+            return f"⚠️ [AquaAlert ಮುಂಗಾರು ಮಾಹಿತಿ] {area_name} ಪ್ರದೇಶದಲ್ಲಿ {rainfall_mm_hr:.1f} mm/h ಸಾಧಾರಣ ಮಳೆ. ಜಲ ಮಟ್ಟ: {river_stage}. ಮುನ್ಸಿಪಲ್ ಪಂಪ್‌ಗಳು ಸಜ್ಜುಗೊಂಡಿವೆ. ತಗ್ಗು ಪ್ರದೇಶಗಳಲ್ಲಿ ಜಾಗರೂಕರಾಗಿರಿ. ರಕ್ಷಣಾ ಪಡೆ: {short_auth}. ಸಹಾಯವಾಣಿ: 1916 / 112."
+        else:
+            return f"⚠️ [AquaAlert MONSOON ADVISORY] Moderate steady rainfall ({rainfall_mm_hr:.1f} mm/h) recorded in {area_name}. River/Drainage: {river_stage}. Municipal suction pumps deployed. Proceed with caution near low-lying underpasses. Rescue team alerted: {short_auth}. Helpline: 1916 / 112."
+
     if lang == "hi":
         return f"🚨 [एक्वाअलर्ट आपदा चेतावनी] {area_name} में {rainfall_mm_hr:.1f} मिमी/घंटा भारी बारिश व बाढ़ का गंभीर खतरा ({severity})! नदी स्तर: {river_stage}। तुरंत सुरक्षित ऊंचे स्थान पर जाएं। निकटतम बचाव दल ({short_auth}) को भी अलर्ट भेजा गया है। आपात हेल्पलाइन: 112 / 1070।"
     elif lang == "kn":
@@ -361,6 +376,7 @@ def dispatch_emergency_sms(req: DispatchSmsRequest):
 
     # Check if a specific alert was requested
     matched_alert = None
+    qualifies = False
     if req.alert_id:
         matched_alert = next((a for a in ACTIVE_ALERTS if a["id"] == req.alert_id or a.get("alias_id") == req.alert_id or a.get("identifier") == req.alert_id), None)
         if matched_alert:
@@ -378,9 +394,9 @@ def dispatch_emergency_sms(req: DispatchSmsRequest):
     if not qualifies:
         return {
             "status": "skipped",
-            "message": "SMS alert suppressed: Dispatches are restricted strictly to heavy rainfall (>= 25 mm/h) or flood emergency conditions near your area.",
+            "message": "SMS alert suppressed: Dispatches are restricted strictly to heavy, severe, or moderate rainfall (>= 15 mm/h) or flood emergency conditions near your area.",
             "rainfall_mm_hr": req.rainfall_mm_hr,
-            "threshold_required_mm_hr": 25.0,
+            "threshold_required_mm_hr": 15.0,
             "area_name": req.area_name
         }
 

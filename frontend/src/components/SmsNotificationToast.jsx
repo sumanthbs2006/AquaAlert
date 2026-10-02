@@ -12,26 +12,28 @@ export default function SmsNotificationToast({ sms, onDismiss, onViewInbox }) {
 
   if (!sms) return null;
 
+  const isModerate = (sms.severity || '').toLowerCase() === 'moderate';
+
   return (
     <aside 
       aria-label="Emergency SMS Alert"
       className="fixed top-16 right-3 sm:right-6 z-[100] max-w-md w-[calc(100vw-1.5rem)] animate-in slide-in-from-top-4 fade-in duration-300"
     >
-      <div className="bg-slate-900/98 backdrop-blur-xl border-2 border-red-500/80 rounded-2xl p-4 shadow-2xl shadow-red-950/60 text-white relative overflow-hidden">
-        {/* Top Emergency Indicator Strip */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-600 via-amber-500 to-red-600 animate-pulse" />
+      <div className={`bg-slate-900/98 backdrop-blur-xl border-2 ${isModerate ? 'border-amber-500/80 shadow-amber-950/60' : 'border-red-500/80 shadow-red-950/60'} rounded-2xl p-4 shadow-2xl text-white relative overflow-hidden`}>
+        {/* Top Indicator Strip */}
+        <div className={`absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r ${isModerate ? 'from-amber-600 via-yellow-400 to-amber-600' : 'from-red-600 via-amber-500 to-red-600'} animate-pulse`} />
 
         {/* Header */}
         <div className="flex items-start justify-between gap-3 mb-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-red-500/20 border border-red-500/50 flex items-center justify-center text-red-400 shrink-0">
+            <div className={`w-8 h-8 rounded-lg ${isModerate ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-red-500/20 border-red-500/50 text-red-400'} border flex items-center justify-center shrink-0`}>
               <Smartphone className="w-4 h-4 animate-bounce" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-red-400 bg-red-950/80 px-2 py-0.5 rounded border border-red-800/60 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping inline-block"></span>
-                  Emergency SMS Alert Output
+                <span className={`text-[11px] font-extrabold uppercase tracking-wider ${isModerate ? 'text-amber-400 bg-amber-950/80 border-amber-800/60' : 'text-red-400 bg-red-950/80 border-red-800/60'} px-2 py-0.5 rounded border flex items-center gap-1`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isModerate ? 'bg-amber-400' : 'bg-red-400'} animate-ping inline-block`}></span>
+                  {isModerate ? 'Monsoon SMS Advisory' : 'Emergency SMS Alert Output'}
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
                   {sms.formatted_time || 'Just Now'}

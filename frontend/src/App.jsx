@@ -174,13 +174,98 @@ export default function App() {
     }
   };
 
-  // Scenario Selection Handler
+  // Central Dispatcher: Sends emergency SMS alert output to user's registered phone number
+  const handleTriggerSmsForAlert = async (alert, customDetails = {}) => {
+    const regPhone = localStorage.getItem('aquaalert_registered_phone');
+    const targetPhone = currentUser?.phone || currentUser?.clean_phone || regPhone || customDetails.phone || '+91 98765 43210';
+    if (!targetPhone) return;
+
+    const areaName = customDetails.area_name || alert?.area_desc || currentRegion?.name || 'Monitored Basin';
+    const hazardType = customDetails.hazard_type || alert?.headline || 'High Flood Inundation & Heavy Rainfall Warning';
+    const severity = customDetails.severity || alert?.severity || 'Severe';
+    const rainfall = customDetails.rainfall_mm_hr || (severity === 'Severe' ? 75.0 : (severity === 'Moderate' ? 28.0 : 45.0));
+    const cleanPhone = currentUser?.clean_phone || (regPhone ? regPhone.replace(/\D/g, '') : targetPhone.replace(/\D/g, ''));
+
+    // 1. Play immediate emergency sound chime
+    playEmergencySmsChime();
+
+    // 2. Build immediate visible output for registered handset
+    const localSmsId = `SMS-CIT-${Date.now()}`;
+    const shortAuth = 'NDRF 5th Battalion & Local DEOC';
+    const localizedText = customDetails.custom_message || alert?.sms_preview || 
+      `🚨 [AquaAlert URGENT FLOOD WARNING] Heavy rainfall (${rainfall.toFixed(1)} mm/h) & flood risk (${severity}) in ${areaName}! River/Drainage: DANGER. Move to higher ground immediately. Alert also transmitted to nearby rescue team: ${shortAuth}. Emergency Helpline: 112 / 1070.`;
+
+    const citizenSms = {
+      id: localSmsId,
+      recipient_phone: targetPhone,
+      clean_phone: cleanPhone,
+      area_name: areaName,
+      hazard_type: hazardType,
+      rainfall_mm_hr: rainfall,
+      severity: severity,
+      river_stage: customDetails.river_stage || (severity === 'Severe' ? 'DANGER' : 'WARNING'),
+      message: localizedText,
+      delivery_status: 'DELIVERED_TO_HANDSET',
+      carrier_gateway: 'INFOBIP GLOBAL SMSC (TRAI-DND-BYPASS)',
+      rescue_authority_alerted: shortAuth,
+      formatted_time: 'Just now'
+    };
+
+    setLatestSmsToast(citizenSms);
+    setSmsHistory(prev => [citizenSms, ...prev.filter(p => p.id !== localSmsId)]);
+
+    // 3. Dispatch to backend API
+    try {
+      const res = await fetch('/api/alerts/dispatch-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: targetPhone,
+          area_name: areaName,
+          hazard_type: hazardType,
+          rainfall_mm_hr: rainfall,
+          severity: severity,
+          alert_id: alert?.id,
+          lat: alert?.lat || currentRegion?.lat,
+          lon: alert?.lon || currentRegion?.lon,
+          lang: currentLang,
+          override_text: customDetails.custom_message || localizedText,
+          is_force_test: true
+        })
+      });
+      const data = await res.json();
+      if (data?.status === 'success' && data.sms) {
+        setLatestSmsToast(data.sms);
+        const entries = data.authority_sms ? [data.sms, data.authority_sms] : [data.sms];
+        setSmsHistory(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const fresh = entries.filter(e => !existingIds.has(e.id));
+          return [...fresh, ...prev.filter(p => p.id !== localSmsId)];
+        });
+      }
+    } catch (err) {
+      console.warn('Backend SMS dispatch notice:', err);
+    }
+  };
+
+  // Scenario Selection Handler with Live Demo Emergency SMS Broadcast
   const handleSelectScenario = async (scenarioId) => {
     try {
+      const regPhone = localStorage.getItem('aquaalert_registered_phone');
+      const targetPhone = currentUser?.phone || currentUser?.clean_phone || regPhone || '+91 98765 43210';
+      const targetArea = currentRegion?.name || 'Mumbai Metropolitan Basin';
+
       const res = await fetch('/api/scenarios/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario_id: scenarioId })
+        body: JSON.stringify({
+          scenario_id: scenarioId,
+          phone: targetPhone,
+          lang: currentLang,
+          area_name: targetArea,
+          lat: currentRegion?.lat,
+          lon: currentRegion?.lon
+        })
       }).then(r => r.json());
 
       if (res.status === 'success') {
@@ -195,6 +280,18 @@ export default function App() {
         setRiskZones(rzRes);
         setSensors(sensorsRes);
         setSensorsSummary(summaryRes);
+
+        // DEMO TRIGGER: When scenario has heavy, severe, or moderate rainfall, backend dispatches SMS
+        if (res.sms_dispatched && res.sms) {
+          playEmergencySmsChime();
+          setLatestSmsToast(res.sms);
+          const entries = res.authority_sms ? [res.sms, res.authority_sms] : [res.sms];
+          setSmsHistory(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const fresh = entries.filter(e => !existingIds.has(e.id));
+            return [...fresh, ...prev];
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to switch scenario:', err);
@@ -214,77 +311,6 @@ export default function App() {
       })
       .catch(err => console.error('Failed to load SMS history:', err));
   }, [currentUser?.phone]);
-
-  // Central Dispatcher: Sends emergency SMS alert output to user's registered phone number
-  const handleTriggerSmsForAlert = async (alert, customDetails = {}) => {
-    if (!currentUser?.phone) return;
-
-    const areaName = customDetails.area_name || alert?.area_desc || currentRegion?.name || 'Monitored Basin';
-    const hazardType = customDetails.hazard_type || alert?.headline || 'High Flood Inundation & Heavy Rainfall Warning';
-    const severity = customDetails.severity || alert?.severity || 'Severe';
-    const rainfall = customDetails.rainfall_mm_hr || (severity === 'Severe' ? 75.0 : 45.0);
-    const cleanPhone = currentUser.clean_phone || currentUser.phone.replace(/\D/g, '');
-
-    // 1. Play immediate emergency sound chime
-    playEmergencySmsChime();
-
-    // 2. Build immediate visible output for registered handset
-    const localSmsId = `SMS-CIT-${Date.now()}`;
-    const shortAuth = 'NDRF 5th Battalion & Local DEOC';
-    const localizedText = alert?.sms_preview || 
-      `🚨 [AquaAlert URGENT FLOOD WARNING] Heavy rainfall (${rainfall.toFixed(1)} mm/h) & flood risk (${severity}) in ${areaName}! River/Drainage: DANGER. Move to higher ground immediately. Alert also transmitted to nearby rescue team: ${shortAuth}. Emergency Helpline: 112 / 1070.`;
-
-    const citizenSms = {
-      id: localSmsId,
-      recipient_phone: currentUser.phone,
-      clean_phone: cleanPhone,
-      area_name: areaName,
-      hazard_type: hazardType,
-      rainfall_mm_hr: rainfall,
-      severity: severity,
-      river_stage: 'DANGER',
-      message: localizedText,
-      delivery_status: 'DELIVERED_TO_HANDSET',
-      carrier_gateway: 'INFOBIP GLOBAL SMSC (TRAI-DND-BYPASS)',
-      rescue_authority_alerted: shortAuth,
-      formatted_time: 'Just now'
-    };
-
-    setLatestSmsToast(citizenSms);
-    setSmsHistory(prev => [citizenSms, ...prev.filter(p => p.id !== localSmsId)]);
-
-    // 3. Dispatch to backend API
-    try {
-      const res = await fetch('/api/alerts/dispatch-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: currentUser.phone,
-          area_name: areaName,
-          hazard_type: hazardType,
-          rainfall_mm_hr: rainfall,
-          severity: severity,
-          alert_id: alert?.id,
-          lat: alert?.lat || currentRegion?.lat,
-          lon: alert?.lon || currentRegion?.lon,
-          lang: currentLang,
-          is_force_test: true
-        })
-      });
-      const data = await res.json();
-      if (data?.status === 'success' && data.sms) {
-        setLatestSmsToast(data.sms);
-        const entries = data.authority_sms ? [data.sms, data.authority_sms] : [data.sms];
-        setSmsHistory(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const fresh = entries.filter(e => !existingIds.has(e.id));
-          return [...fresh, ...prev.filter(p => p.id !== localSmsId)];
-        });
-      }
-    } catch (err) {
-      console.warn('Backend SMS dispatch notice:', err);
-    }
-  };
 
   // Proximity Alert Dispatcher: ONLY triggered when user provides their location or uses GPS and an alert is nearby
   const checkAndDispatchProximitySms = async (targetLat, targetLon, targetName, actionSource = 'unknown') => {
