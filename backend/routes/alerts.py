@@ -585,6 +585,11 @@ def check_user_proximity(
             disaster_a["severity"] = "Severe"
             disaster_a["headline"] = f"RED ALERT: {active_sc_id.replace('_', ' ').title()} & Flash Inundation across Mumbai Basin"
             candidate_alerts.append(disaster_a)
+        elif active_sc_id in ["normal_monsoon", "normal"] and a.get("id") == "ALERT-LIVE-MH-006":
+            disaster_a = dict(a)
+            disaster_a["severity"] = "Moderate"
+            disaster_a["headline"] = "ADVISORY: Standard Seasonal Monsoon Downpour & Lowland Waterlogging"
+            candidate_alerts.append(disaster_a)
 
     for alert in candidate_alerts:
         a_lat = alert.get("lat")

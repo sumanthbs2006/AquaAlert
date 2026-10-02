@@ -49,6 +49,49 @@ const playEmergencySmsChime = () => {
   }
 };
 
+const getScenarioSmsMessage = (scenarioId, areaName, lang = 'en', rain = 75.0) => {
+  const l = (lang || 'en').toLowerCase();
+  const area = areaName || 'Local Monitored Area';
+
+  if (scenarioId === 'cloudburst') {
+    if (l === 'hi') {
+      return `🚨 [एक्वाअलर्ट लाल चेतावनी] ${area} में भारी बादल फटना (${rain.toFixed(1)} मिमी/घंटा) व भीषण बाढ़ की स्थिति! नदियां खतरे के निशान से ऊपर। तुरंत सुरक्षित ऊंचे स्थान पर जाएं। NDRF QRT तैनात। आपातकालीन: 112 / 1070।`;
+    }
+    if (l === 'kn') {
+      return `🚨 [AquaAlert ರೆಡ್ ಅಲರ್ಟ್] ${area} ಪ್ರದೇಶದಲ್ಲಿ ಮೇಘಸ್ಫೋಟ (${rain.toFixed(1)} mm/h) ಮತ್ತು ಪ್ರವಾಹ! ತಕ್ಷಣ ಎತ್ತರದ ಪ್ರದೇಶಗಳಿಗೆ ತೆರಳಿ. NDRF ರಕ್ಷಣಾ ಪಡೆ ಸನ್ನದ್ಧವಾಗಿದೆ. ತುರ್ತು ಸಹಾಯ: 112 / 1070.`;
+    }
+    return `🚨 [AquaAlert RED FLOOD ALERT] Severe Cloudburst (${rain.toFixed(1)} mm/h) active over ${area}! Critical river surcharge & street inundation (40–70cm). Relocate to higher ground immediately. NDRF Quick Response Team deployed. Emergency: 112 / 1070.`;
+  }
+
+  if (scenarioId === 'cyclone_surge' || scenarioId === 'cyclone') {
+    if (l === 'hi') {
+      return `🚨 [एक्वाअलर्ट चक्रवाती चेतावनी] ${area} में भारी चक्रवाती बारिश (${rain.toFixed(1)} मिमी/घंटा) और 4.8 मीटर समुद्री ज्वार! तटीय सड़कों व सबवे से दूर रहें। DEOC आपातकालीन: 112 / 1916।`;
+    }
+    if (l === 'kn') {
+      return `🚨 [AquaAlert ಚಂಡಮಾರುತ ಎಚ್ಚರಿಕೆ] ${area} ಕರಾವಳಿಯಲ್ಲಿ ಭಾರಿ ಮಳೆ (${rain.toFixed(1)} mm/h) ಮತ್ತು 4.8m ಉಬ್ಬರವಿಳಿತದ ಅಲೆಗಳು! ಕರಾವಳಿ ಮಾರ್ಗಗಳನ್ನು ತಪ್ಪಿಸಿ. DEOC ತುರ್ತು: 112 / 1916.`;
+    }
+    return `🚨 [AquaAlert CYCLONIC SURGE WARNING] Heavy outer rainbands (${rain.toFixed(1)} mm/h) & 4.8m tidal storm surge in ${area}! Sea outfalls locked. Avoid coastal corridors and subways. DEOC Emergency: 112 / 1916.`;
+  }
+
+  if (scenarioId === 'normal_monsoon' || scenarioId === 'normal') {
+    if (l === 'hi') {
+      return `⚠️ [एक्वाअलर्ट मानसूनी सूचना] ${area} में सामान्य मध्यम मानसूनी बारिश (${rain.toFixed(1)} मिमी/घंटा)। नगर निगम पंप सक्रिय हैं। निचले जलभराव वाले रास्तों पर सावधानी बरतें। हेल्पलाइन: 1916 / 112।`;
+    }
+    if (l === 'kn') {
+      return `⚠️ [AquaAlert ಮುಂಗಾರು ಮಾಹಿತಿ] ${area} ಪ್ರದೇಶದಲ್ಲಿ ಸಾಧಾರಣ ಮುಂಗಾರು ಮಳೆ (${rain.toFixed(1)} mm/h). ನೀರು ಹೊರಹಾಕುವ ಪಂಪ್‌ಗಳು ಕಾರ್ಯನಿರ್ವಹಿಸುತ್ತಿವೆ. ತಗ್ಗು ಪ್ರದೇಶಗಳಲ್ಲಿ ಜಾಗರೂಕರಾಗಿರಿ. ಸಹಾಯವಾಣಿ: 1916 / 112.`;
+    }
+    return `⚠️ [AquaAlert MONSOON ADVISORY] Moderate steady monsoon rain (${rain.toFixed(1)} mm/h) recorded in ${area}. Municipal suction pumps deployed. Proceed with caution near railway dips and lowlands. Helpline: 1916 / 112.`;
+  }
+
+  if (l === 'hi') {
+    return `⚠️ [एक्वाअलर्ट लाइव मौसम सूचना] लाइव मौसम रडार ने ${area} में ${rain.toFixed(1)} मिमी/घंटा बारिश दर्ज की है। जल निकासी निगरानी जारी। हेल्पलाइन: 112 / 1916।`;
+  }
+  if (l === 'kn') {
+    return `⚠️ [AquaAlert ಲೈವ್ ಹವಾಮಾನ ಮಾಹಿತಿ] ಲೈವ್ ರಾಡಾರ್ ${area} ಪ್ರದೇಶದಲ್ಲಿ ${rain.toFixed(1)} mm/h ಮಳೆಯನ್ನು ದಾಖಲಿಸಿದೆ. ನಿಗಾ ಇರಿಸಲಾಗಿದೆ. ಸಹಾಯವಾಣಿ: 112 / 1916.`;
+  }
+  return `⚠️ [AquaAlert LIVE WEATHER ALERT] Live atmospheric telemetry detects ${rain.toFixed(1)} mm/h rainfall in ${area}. Drainage and river monitoring active. Helpline: 112 / 1916.`;
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -150,9 +193,62 @@ export default function App() {
       setRiskZones(rzRes);
       setSensors(sensorsRes);
 
-      // Trigger emergency SMS alert ONLY when user explicitly gives location or uses GPS and an alert is nearby!
-      if (isUserAction && currentUser?.phone) {
-        await checkAndDispatchProximitySms(lat, lon, name, source);
+      // Trigger automatic SMS alert whenever user explicitly gives location (Search, GPS, or Basin)
+      // corresponding to the active meteorological scenario (Cloudburst, Cyclone Surge, Normal Monsoon, or Live Weather)
+      if (isUserAction) {
+        const regPhone = localStorage.getItem('aquaalert_registered_phone');
+        const targetPhone = currentUser?.phone || currentUser?.clean_phone || regPhone || '+91 98765 43210';
+        const scId = activeScenario?.id || 'live_weather';
+        const locName = name || 'Your Monitored Location';
+        const locDedupeKey = `${targetPhone}_${scId}_${locName}`;
+
+        if (!dispatchedHazardKeys.current.has(locDedupeKey)) {
+          dispatchedHazardKeys.current.add(locDedupeKey);
+
+          if (scId === 'cloudburst') {
+            const customMsg = getScenarioSmsMessage('cloudburst', locName, currentLang, 85.0);
+            await handleTriggerSmsForAlert(null, {
+              phone: targetPhone,
+              area_name: locName,
+              hazard_type: 'Monsoon Cloudburst & Flash Flood Surge Emergency',
+              rainfall_mm_hr: 85.0,
+              severity: 'Severe',
+              river_stage: 'DANGER',
+              lat,
+              lon,
+              custom_message: customMsg
+            });
+          } else if (scId === 'cyclone_surge' || scId === 'cyclone') {
+            const customMsg = getScenarioSmsMessage('cyclone_surge', locName, currentLang, 55.0);
+            await handleTriggerSmsForAlert(null, {
+              phone: targetPhone,
+              area_name: locName,
+              hazard_type: 'Cyclonic Rain-Band & Tidal Backwater Surge Advisory',
+              rainfall_mm_hr: 55.0,
+              severity: 'Severe',
+              river_stage: 'DANGER',
+              lat,
+              lon,
+              custom_message: customMsg
+            });
+          } else if (scId === 'normal_monsoon' || scId === 'normal') {
+            const customMsg = getScenarioSmsMessage('normal_monsoon', locName, currentLang, 28.0);
+            await handleTriggerSmsForAlert(null, {
+              phone: targetPhone,
+              area_name: locName,
+              hazard_type: 'Steady Seasonal Monsoon Downpour Advisory',
+              rainfall_mm_hr: 28.0,
+              severity: 'Moderate',
+              river_stage: 'WARNING',
+              lat,
+              lon,
+              custom_message: customMsg
+            });
+          } else if (scId === 'live_weather') {
+            await checkAndDispatchProximitySms(lat, lon, locName, source);
+          }
+          // If dry_baseline: dry weather / safe conditions, so no flood warning SMS is dispatched
+        }
       }
     } catch (e) {
       console.error('Failed to load regional telemetry:', e);
@@ -251,6 +347,7 @@ export default function App() {
   // Scenario Selection Handler with Live Demo Emergency SMS Broadcast
   const handleSelectScenario = async (scenarioId) => {
     try {
+      dispatchedHazardKeys.current.clear();
       const regPhone = localStorage.getItem('aquaalert_registered_phone');
       const targetPhone = currentUser?.phone || currentUser?.clean_phone || regPhone || '+91 98765 43210';
       const targetArea = currentRegion?.name || 'Mumbai Metropolitan Basin';
